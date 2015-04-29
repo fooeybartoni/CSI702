@@ -1,0 +1,53 @@
+Homework #1 - code optimization
+Bruce Goldfeder
+April 15, 2015
+CSI 702
+
+Section One:  Initial Profiling
+
+I performed initial experiments with various timing mechanisms available in my environment (Centos 6.6).  I leveraged the /usr/bin/time function of the OS which provides a rough estimate for running the code returning a length of time using variants of the command:
+
+/usr/bin/time --format '%C took %e seconds' ./pp.x
+
+Executing this ran the code and created the output:
+...
+V=1.243829e+05 K=3.373595e-01 E=1.243833e+05 e(E)=3.196588e-12
+V=1.243829e+05 K=3.408038e-01 E=1.243833e+05 e(E)=2.969037e-12
+V=1.243829e+05 K=3.442656e-01 E=1.243833e+05 e(E)=2.742189e-12
+./pp.x took 15.15 seconds
+
+A better way to accomplish more accurate timing is to use the gcc profiler, gprof.  To do this I need to recompile the code using the -pg for both compilation and linking.  After running the code the gmon.out file is created, which inturn is used by gprof to create a profile of the run.  Snippet shown below:
+
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 36.43      2.09     2.09 199700000     0.00     0.00  magnitude
+ 26.32      3.61     1.51 649400000     0.00     0.00  square
+ 16.56      4.56     0.95 199600000     0.00     0.00  dist
+ 11.50      5.22     0.66      200     3.31    21.69  calcforces
+  6.01      5.57     0.35 149700000     0.00     0.00  dV
+  2.09      5.69     0.12      200     0.60     7.01  calcpotent
+  0.96      5.74     0.06 49900000     0.00     0.00  V
+  0.35      5.76     0.02        1    20.04    20.04  init
+  0.00      5.76     0.00     1500     0.00     0.00  random_number
+  0.00      5.76     0.00      200     0.00    28.71  advance
+  0.00      5.76     0.00      200     0.00     0.01  calckinetic
+  0.00      5.76     0.00      200     0.00    28.71  compute
+  0.00      5.76     0.00      200     0.00     0.00  verlet
+  0.00      5.76     0.00      200     0.00     0.00  zeroforces
+  0.00      5.76     0.00        1     0.00     0.00  random_seed
+
+Section Two:  Optimization
+
+First experiment was to recompile using the -O3 optimization level in the compiler and compare the results to the baseline from Section One.  The output generated from gprof seem to indicate that all of the code was inlined into a single function, main, and along with other optimizations reduced run from 5.76 sec to 0.91 seconds or a speedup of 6.3x.
+
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  Ts/call  Ts/call  name    
+100.11      0.91     0.91                             main
+
+Second experiment was to perform a set of optimization steps.  These included the use of Macro definitions (e.g. PI) and inlining for function call reduction.  These steps reduced the execution time from 5.76 to 4.04 seconds.  Further reduction via inlining and restructuring the loops to better take advantage of the memory structure of C will reduce this further to the -O3 optimized level.
