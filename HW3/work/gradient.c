@@ -3,8 +3,8 @@
 
 #define A 1
 #define B 1
-#define H 0.1
-#define K 0.1
+#define H 0.01
+#define K 0.01
 
 double hwFunc(double x, double y);
 
@@ -30,7 +30,7 @@ grad actual[100][100];
 double hwFunc(double x, double y) {
    double z;
    z = A * x  + B * (x / (pow(x,2) + pow(y,2)));
-   printf("x: %f y: %f z: %f\n",x,y,z);
+   //printf("%f,%f,%f\n",x,y,z);
    return z;
 }
 
@@ -38,7 +38,6 @@ double Partial_Derivative_X(double x, double y) {
 
    double z;
    z = (hwFunc(x + H, y) - hwFunc(x-H,y)) / (2 * H); 
-   
    return z;
 }
 
@@ -46,7 +45,6 @@ double Partial_Derivative_Y(double x, double y) {
 
    double z;
    z = (hwFunc(x, y + K) - hwFunc(x,y-K)) / (2 * K); 
-   
    return z;
 }
 
@@ -55,13 +53,20 @@ void Form_Gradient() {
    int i,j;
    i=0;
    j=0;
+   double x,y,small_i,small_j;
 
    for (i=0; i<100; i++) {
 
       for (j=0; j<100; j++) {
 
-         gradient[i][j].gradX=Partial_Derivative_X(i,j);
-         gradient[i][j].gradY=Partial_Derivative_Y(i,j);
+         small_i = i/25.0 - 2.0;
+         small_j = j/25.0 - 2.0;
+
+         x=Partial_Derivative_X(small_i,small_j);
+         gradient[i][j].gradX=x;
+         y=Partial_Derivative_Y(small_i,small_j);
+         gradient[i][j].gradY=y;
+         printf("%f,%f,%f,%f\n",small_i,small_j,x,y);
       }
    }
 
@@ -85,5 +90,5 @@ void Form_Actual() {
 
 
 int main() {
-   Form_Actual();
+   Form_Gradient();
 }
