@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <omp.h>
 
 #define A 1
 #define B 1
@@ -17,17 +18,11 @@ void Form_Gradient();
 
 void Form_Actual();
 
-typedef struct {
-    double gradX;
-    double gradY;
-} grad;
-
-
-
 double gradientX[numPts][numPts];
 double gradientY[numPts][numPts];
+double xycoord[numPts];
 
-grad actual[100][100];
+double actual[numPts][numPts];
 
 //-------------------------------------------
 //function implementation
@@ -60,8 +55,14 @@ void Form_Gradient() {
    k=0;
    double cxy;
    double xGrad,yGrad,small_i,small_j;
+   
+   int target_thread_num = 4;
+   omp_set_num_threads(target_thread_num);
+   unsigned long times[target_thread_num];
+
+
    cxy=XYMIN;
-   double xycoord[numPts];
+   
    double step = (XYMAX - XYMIN)/numPts;
 
    for (k=0; k<numPts; k++){
@@ -69,29 +70,42 @@ void Form_Gradient() {
       cxy = cxy + step;
    }
 
-   for (i=0; i<numPts; i++) {
+   double gX[numPts][numPts];
+   double gY[numPts][numPts];
 
+   // OMP Loop
+   #pragma omp parallel for shared(gX,gY), private(i,j)
+   for (i=0; i<numPts; i++) {
       for(j=0; j<numPts; j++) {
+
+         //int thread_id = omp_get_thread_num();
+         //printf("thread id: %d running",thread_id);
+
          xGrad=Partial_Derivative_X(xycoord[i],xycoord[j]);
-         gradientX[i][j]=xGrad;
+         gX[i][j]=xGrad;
          yGrad=Partial_Derivative_Y(xycoord[i],xycoord[j]);
-         gradientY[i][j]=yGrad;
-         //printf("%f,%f,%f,%f\n",xycoord[i],xycoord[j],x,y);
+         gY[i][j]=yGrad;
       }
    }
+
+   // Deep Copy Arrays Can be replaced by elegant pointer stuff that I am not up to right now
+   for (i=0; i<numPts; i++) {
+      for (j=0; j<numPts; j++) {
+         gradientX[i][j] = gX[i][j];
+         gradientY[i][j] = gY[i][j];
+      }
+   }
+}
+
+void Save_Data() {
 
    FILE * fpX;
    FILE * fpY;
    FILE * fpCoords;
-/*
-   if((fp=fopen("ax.out", "wb"))==NULL) {
-    printf("Cannot open file.\n");
-   }
 
-   if(fwrite(gradientX, sizeof(double), numPts*numPts, fp) != numPts*numPts)
-    printf("File write error.");
-   fclose(fp);
-*/
+   int i,j;
+   i=0;
+   j=0;
 
    if((fpX=fopen("ax.out", "w+"))==NULL) {
     printf("Cannot open file fpX.\n");
@@ -112,14 +126,15 @@ void Form_Gradient() {
          fprintf(fpY,"%f \t",gradientY[i][j]);
          
       }
-      fprintf(fpX,"\n"); 
-      fprintf(fpY,"\n");
-      fprintf(fpCoords, "\n");
+      if (i != numPts-1) {
+         fprintf(fpX,"\n"); 
+         fprintf(fpY,"\n");
+         fprintf(fpCoords, "\n");
+      }
    }
    fclose(fpX);
    fclose(fpY);
    fclose(fpCoords);
-
 }
 
 void Form_Actual() {
@@ -131,14 +146,13 @@ void Form_Actual() {
 
       for (j=0; j<100; j++) {
 
-         actual[i][j].gradX=hwFunc(i,j);
-         actual[i][j].gradY=hwFunc(i,j);
+         actual[i][j]=hwFunc(i,j);
       }
    }
 
 }
 
-
 int main() {
    Form_Gradient();
+   Save_Data();
 }
