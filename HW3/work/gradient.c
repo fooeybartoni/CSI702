@@ -3,8 +3,9 @@
 
 #define A 1
 #define B 1
-#define H 0.01
-#define K 0.01
+#define numPts 100
+#define XYMAX 2.0
+#define XYMIN -2.0
 
 double hwFunc(double x, double y);
 
@@ -21,7 +22,10 @@ typedef struct {
     double gradY;
 } grad;
 
-grad gradient[100][100];
+
+
+double gradientX[numPts][numPts];
+double gradientY[numPts][numPts];
 
 grad actual[100][100];
 
@@ -30,45 +34,91 @@ grad actual[100][100];
 double hwFunc(double x, double y) {
    double z;
    z = A * x  + B * (x / (pow(x,2) + pow(y,2)));
-   //printf("%f,%f,%f\n",x,y,z);
+   
    return z;
 }
 
 double Partial_Derivative_X(double x, double y) {
-
+   double H = (XYMAX - XYMIN)/numPts;
    double z;
-   z = (hwFunc(x + H, y) - hwFunc(x-H,y)) / (2 * H); 
+   z = (hwFunc(x + H, y) - hwFunc(x-H,y)) / (2.0 * H); 
    return z;
 }
 
 double Partial_Derivative_Y(double x, double y) {
-
+   double K = (XYMAX - XYMIN)/numPts;
    double z;
-   z = (hwFunc(x, y + K) - hwFunc(x,y-K)) / (2 * K); 
+   z = (hwFunc(x, y + K) - hwFunc(x,y-K)) / (2.0 * K); 
    return z;
 }
 
 void Form_Gradient() {
 
-   int i,j;
+   int i,j,k;
    i=0;
    j=0;
-   double x,y,small_i,small_j;
+   k=0;
+   double cxy;
+   double xGrad,yGrad,small_i,small_j;
+   cxy=XYMIN;
+   double xycoord[numPts];
+   double step = (XYMAX - XYMIN)/numPts;
 
-   for (i=0; i<100; i++) {
+   for (k=0; k<numPts; k++){
+      xycoord[k]=cxy;
+      cxy = cxy + step;
+   }
 
-      for (j=0; j<100; j++) {
+   for (i=0; i<numPts; i++) {
 
-         small_i = i/25.0 - 2.0;
-         small_j = j/25.0 - 2.0;
-
-         x=Partial_Derivative_X(small_i,small_j);
-         gradient[i][j].gradX=x;
-         y=Partial_Derivative_Y(small_i,small_j);
-         gradient[i][j].gradY=y;
-         printf("%f,%f,%f,%f\n",small_i,small_j,x,y);
+      for(j=0; j<numPts; j++) {
+         xGrad=Partial_Derivative_X(xycoord[i],xycoord[j]);
+         gradientX[i][j]=xGrad;
+         yGrad=Partial_Derivative_Y(xycoord[i],xycoord[j]);
+         gradientY[i][j]=yGrad;
+         //printf("%f,%f,%f,%f\n",xycoord[i],xycoord[j],x,y);
       }
    }
+
+   FILE * fpX;
+   FILE * fpY;
+   FILE * fpCoords;
+/*
+   if((fp=fopen("ax.out", "wb"))==NULL) {
+    printf("Cannot open file.\n");
+   }
+
+   if(fwrite(gradientX, sizeof(double), numPts*numPts, fp) != numPts*numPts)
+    printf("File write error.");
+   fclose(fp);
+*/
+
+   if((fpX=fopen("ax.out", "w+"))==NULL) {
+    printf("Cannot open file fpX.\n");
+   }
+
+   if((fpY=fopen("ay.out", "w+"))==NULL) {
+    printf("Cannot open file fpY.\n");
+   }
+
+   if((fpCoords=fopen("xyCoords.out", "w+"))==NULL) {
+    printf("Cannot open file xyCoords.\n");
+   }
+
+   for (i=0; i<numPts; i++) {
+      fprintf(fpCoords,"%f\t%f",xycoord[i],xycoord[i]);
+      for (j=0; j<numPts; j++) {
+         fprintf(fpX,"%f \t",gradientX[i][j]);
+         fprintf(fpY,"%f \t",gradientY[i][j]);
+         
+      }
+      fprintf(fpX,"\n"); 
+      fprintf(fpY,"\n");
+      fprintf(fpCoords, "\n");
+   }
+   fclose(fpX);
+   fclose(fpY);
+   fclose(fpCoords);
 
 }
 
