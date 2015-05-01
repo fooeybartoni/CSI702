@@ -75,7 +75,7 @@ void Form_Gradient() {
    double gY[numPts][numPts];
 
    // OMP Loop
-   #pragma omp parallel for shared(gX,gY), private(i,j)
+   //#pragma omp parallel for shared(gX,gY), private(i,j)
    for (i=0; i<numPts; i++) {
       for(j=0; j<numPts; j++) {
 
@@ -87,11 +87,11 @@ void Form_Gradient() {
          yGrad=Partial_Derivative_Y(xycoord[i],xycoord[j]);
          gY[i][j]=yGrad;
          magnitude = sqrt(pow(xGrad,2)+pow(yGrad,2));
-         
-         #pragma omp flush(max_value)
+         printf("GradX: %f  GradY: %f  Magnitude: %f\n",xGrad,yGrad,magnitude);
+         //#pragma omp flush(max_value)
          if (magnitude > max_value)
          {
-            #pragma omp critical
+            //#pragma omp critical
             {
                if (magnitude > max_value) max_value = magnitude;
             }
