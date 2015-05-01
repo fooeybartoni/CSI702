@@ -59,7 +59,8 @@ void Form_Gradient() {
    int target_thread_num = 4;
    omp_set_num_threads(target_thread_num);
    unsigned long times[target_thread_num];
-
+   double max_value=0.0;
+   double magnitude=0.0;
 
    cxy=XYMIN;
    
@@ -85,8 +86,21 @@ void Form_Gradient() {
          gX[i][j]=xGrad;
          yGrad=Partial_Derivative_Y(xycoord[i],xycoord[j]);
          gY[i][j]=yGrad;
+         magnitude = sqrt(pow(xGrad,2)+pow(yGrad,2));
+         
+         #pragma omp flush(max_value)
+         if (magnitude > max_value)
+         {
+            #pragma omp critical
+            {
+               if (magnitude > max_value) max_value = magnitude;
+            }
+         }
+
       }
    }
+
+   printf("Maximum Vector Magnitude is: %f\n",max_value);
 
    // Deep Copy Arrays Can be replaced by elegant pointer stuff that I am not up to right now
    for (i=0; i<numPts; i++) {
@@ -137,6 +151,7 @@ void Save_Data() {
    fclose(fpCoords);
 }
 
+// Used to test the original function and view in 3d graph
 void Form_Actual() {
     int i,j;
    i=0;

@@ -3,7 +3,7 @@ EXE=gradient.x
 OBJ=gradient.o 
 
 CMP=gcc -g -pg -c -fopenmp
-LNK=gcc -pg -fopenmp
+LNK=gcc -pg -lm -fopenmp
 
 all: $(EXE)
 	@echo "done"
