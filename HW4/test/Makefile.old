@@ -1,0 +1,10 @@
+EXECS=mpi_hello_w.x
+MPICC?=mpicc
+
+all: ${EXECS}
+
+mpi_hello_world: mpi_hello_w.c
+    ${MPICC} -o mpi_hello_w mpi_hello_w.c
+
+clean:
+    rm ${EXECS}
