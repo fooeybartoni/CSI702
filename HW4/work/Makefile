@@ -1,6 +1,6 @@
 
-EXE=mpi_hw4.x
-OBJ=mpi_hw4.o 
+EXE=mpi_hw4a.x
+OBJ=mpi_hw4a.o 
 
 CMP=gcc -g -pg -c
 LNK=gcc -pg -lm
@@ -14,6 +14,6 @@ clean:
 $(EXE): $(OBJ) 
 	$(LNK) -o $@ $(OBJ)
 
-gradient.o: mpi_hw4.c
+gradient.o: mpi_hw4a.c
 	$(CMP) $?
 
