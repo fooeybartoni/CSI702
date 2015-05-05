@@ -158,13 +158,15 @@ int main(int argc, char *argv[]) {
       tag2, source, chunksize, cnt; 
    MPI_Status status;
    
-   int offset[3];
+   
 
    int p0Cnt,p1Cnt,p2Cnt,p3Cnt;
-   p0Cnt=0;
-   p1Cnt=1;
-   p2Cnt=2;
-   p3Cnt=3;
+   //p0Cnt=0;
+   //p1Cnt=1;
+   //p2Cnt=2;
+   //p3Cnt=3;
+
+   int offset0, offset1, offset2,offset3;
    
    MPI_Datatype particle_type;
 
@@ -214,6 +216,10 @@ int main(int argc, char *argv[]) {
       create_particle_datatype();
       Make_Particles();
       i=0;
+      p0Cnt=0;
+      p1Cnt=0;
+      p2Cnt=0;
+      p3Cnt=0;
       
       for (i=0; i<numParts; i++) {
          if (xycoord[i].x < 0) { // left half of plot
@@ -222,11 +228,13 @@ int main(int argc, char *argv[]) {
                xycoord[i].gridNum = 3;
                p3Cnt=p3Cnt + 1;
             }
-            else { 
+            else if (xycoord[i].y >= 0) { 
                // Q0
                xycoord[i].gridNum = 0;
                p0Cnt=p0Cnt + 1;
             }
+            else
+               printf("Error Categorizing");
          }
          else { //right half of plot
             if (xycoord[i].y < 0) {// Quadrant 2
@@ -234,31 +242,48 @@ int main(int argc, char *argv[]) {
                xycoord[i].gridNum = 2;
                p2Cnt=p2Cnt +1;
             }
-            else { //Quadrant 1
+            else if (xycoord[i].y >= 0) { //Quadrant 1
                // Q1
                xycoord[i].gridNum = 1;
                p1Cnt=p1Cnt + 1;
-
             }
+            else
+               printf("Error Categorizing");
 
          }
       }
-
-      printf("Initialized array cnt of %d\n",p1Cnt);
+      int total = p0Cnt+p1Cnt+p2Cnt+p3Cnt;
+      printf("Initialized array cnts of %d,%d,%d,%d, sum: %d\n",p0Cnt,p1Cnt,p2Cnt,p3Cnt,total);
       qsort(xycoord, numParts, sizeof(xycoord[0]), SortFunc);
       
       int dest=1;
-      offset={p0Cnt,p0Cnt+p1Cnt,p0Cnt+p1Cnt+p2Cnt};
+      offset0=0;
+      offset1=p0Cnt;
+      offset2=offset1+p1Cnt;
+      offset3=offset2+p2Cnt;
       chunksize=p1Cnt;
 
       /* Send each task its portion of the array - master keeps 1st part */
-         
+      // NEED TO REFACTOR TO CREATE IN LOOP  
       // Send P1 set
-      MPI_Send(&offset[0], 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
-      MPI_Send(&xycoord[0], chunksize, particle_type, dest, tag2, MPI_COMM_WORLD);
-      printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset);
+      MPI_Send(&offset1, 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
+      MPI_Send(&xycoord[offset1], chunksize, particle_type, dest, tag2, MPI_COMM_WORLD);
+      printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset1);
 
 
+      // Send P2 set
+      dest=2;
+      chunksize = p2Cnt;
+      MPI_Send(&offset2, 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
+      MPI_Send(&xycoord[offset2], chunksize, particle_type, dest, tag2, MPI_COMM_WORLD);
+      printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset2);
+
+      // Send P3 set
+      dest=3;
+      chunksize = p3Cnt;
+      MPI_Send(&offset3, 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
+      MPI_Send(&xycoord[offset3], chunksize, particle_type, dest, tag2, MPI_COMM_WORLD);
+      printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset3);
                 
    }
 
@@ -269,18 +294,56 @@ int main(int argc, char *argv[]) {
 
       /* Receive my portion of array from the master task */
       source = MASTER;
-      //offset=p0Cnt;
-      //chunksize=p1Cnt;
-      MPI_Recv(&offset, 1, MPI_INT, source, tag1, MPI_COMM_WORLD, &status);
-      MPI_Recv(&xycoord[offset], chunksize, particle_type, source, tag2, 
+
+      
+      MPI_Recv(&offset1, 1, MPI_INT, source, tag1, MPI_COMM_WORLD, &status);
+      MPI_Recv(&xycoord[offset1], chunksize, particle_type, source, tag2, 
          MPI_COMM_WORLD, &status);
-      printf("offset is %d",offset);
-      printf("Hooray, I am in task and have data value %f",xycoord[offset].x);
-      printf("hooray number one");
+      printf("offset is %d\n",offset1);
+      printf("Hooray, I am in task and have data value %f\n",xycoord[offset1].x);
+      
+      MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
+      printf("taskid is %d\n",taskid);
+
+   }
+
+   if (taskid == 2) {
+
+      create_particle_datatype();
+
+      //Receive my portion of array from the master task 
+      source = MASTER;
+      
+      MPI_Recv(&offset2, 1, MPI_INT, source, tag1, MPI_COMM_WORLD, &status);
+      MPI_Recv(&xycoord[offset2], chunksize, particle_type, source, tag2, 
+         MPI_COMM_WORLD, &status);
+      printf("offset is %d\n",offset2);
+      printf("Hooray, I am in task and have data value %f\n",xycoord[offset2].x);
+      
+      MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
+      printf("taskid is %d\n",taskid);
+
+   }
+
+   
+
+   if (taskid == 3) {
+
+      create_particle_datatype();
+
+      // Receive my portion of array from the master task 
+      source = MASTER;
+      
+      MPI_Recv(&offset3, 1, MPI_INT, source, tag1, MPI_COMM_WORLD, &status);
+      MPI_Recv(&xycoord[offset3], chunksize, particle_type, source, tag2, 
+         MPI_COMM_WORLD, &status);
+      printf("offset is %d",offset1);
+      printf("Hooray, I am in task and have data value %f",xycoord[offset3].x);
+      
       MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
       printf("taskid is %d",taskid);
 
-   }
+   } 
 
     MPI_Finalize();      
 
