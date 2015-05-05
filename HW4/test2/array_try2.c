@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 #define  ARRAYSIZE   100
 #define  MASTER      0
 #define XYMAX 2.0
@@ -90,7 +91,7 @@ void Form_Gradient(Particle xycoord[], size_t size) {
   
 }
 
-void Save_Data(Particle *xycoord,int cnt) {
+void Save_Data(Particle xycoord[],int myTaskId) {
 
    FILE * fpVelocity;
    FILE * fpTimeStep;
@@ -99,7 +100,14 @@ void Save_Data(Particle *xycoord,int cnt) {
    i=0;
    j=0;
 
-   if((fpVelocity=fopen("velocity.out", "w+"))==NULL) {
+   char buffer[16];
+   
+   
+   sprintf(buffer, "velocity%d.out", myTaskId);
+   
+   
+
+   if((fpVelocity=fopen(buffer, "w+"))==NULL) {
     printf("Cannot open file fpX.\n");
    }
 
@@ -110,20 +118,42 @@ void Save_Data(Particle *xycoord,int cnt) {
    fprintf(fpTimeStep,"%f",time_step);
 
    for (i=0; i<ARRAYSIZE; i++) {
-          
-      fprintf(fpVelocity,"%f,",xycoord[i].x);
-      fprintf(fpVelocity,"%f,",xycoord[i].y);
-      fprintf(fpVelocity,"%f,",xycoord[i].velX);
-      fprintf(fpVelocity,"%f",xycoord[i].velY);
-      
-      if (i != ARRAYSIZE-1) {
-         fprintf(fpVelocity,"\n");         
+      if (xycoord[i].x < 90) {   
+         fprintf(fpVelocity,"%f,",xycoord[i].x);
+         fprintf(fpVelocity,"%f,",xycoord[i].y);
+         fprintf(fpVelocity,"%f,",xycoord[i].velX);
+         fprintf(fpVelocity,"%f",xycoord[i].velY);
+         
+         if (i != ARRAYSIZE-1) {
+            fprintf(fpVelocity,"\n");         
+         }
       }
    }
    
    fclose(fpVelocity);
    fclose(fpTimeStep);
 }
+
+
+// I would GATHER back using this struct MPI Datatype
+MPI_Datatype create_particle_datatype()
+   {
+      MPI_Datatype particle_type;
+       MPI_Datatype array_of_types[1];
+       int array_of_blocklengths[1];
+       MPI_Aint array_of_displacements[1],lb,extent;
+       MPI_Type_get_extent(MPI_DOUBLE, &lb, &extent);
+
+       /* Create MPI Datatype for Particle struct*/
+       array_of_types[0] = MPI_DOUBLE;
+       array_of_blocklengths[0] = 4;
+       array_of_displacements[0] = 0;
+       
+       MPI_Type_create_struct(2, array_of_blocklengths, array_of_displacements,
+           array_of_types, &particle_type);
+       MPI_Type_commit(&particle_type);
+       return particle_type;
+   }
 
 /* ########################################################   
 
@@ -218,6 +248,26 @@ void Save_Data(Particle *xycoord,int cnt) {
          printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset);
          offset = offset + chunksize;
       }
+
+      for (i=0; i < ARRAYSIZE; i++) {
+         answer[i].x = pListX[taskid][i];
+         answer[i].y = pListY[taskid][i];
+         answer[i].velX = 0.0;
+         answer[i].velY = 0.0;
+      }
+
+      // Now Master has to do his work
+      Form_Gradient(answer,ARRAYSIZE);
+      //answer = Form_Gradient(answer);
+
+      printf("Answer x: %f, velX: %f\n", answer[0].x,answer[0].velX);
+
+      Save_Data(answer,taskid);
+
+      // I will save the Gather functionality for HW6 but can put it in if I 
+      // have time.  I am happy with each processor calling the Gradient function
+      // for each of their respective quadrants and servicing their assigned 
+      // aka not '99.00' sets of coordinates.
    }
 
    if (taskid > MASTER) {
@@ -246,17 +296,10 @@ void Save_Data(Particle *xycoord,int cnt) {
       Form_Gradient(answer,ARRAYSIZE);
       //answer = Form_Gradient(answer);
 
-      printf("Answer x: %f, velX: %f", answer[0].x,answer[0].velX);
+      printf("Answer x: %f, velX: %f\n", answer[0].x,answer[0].velX);
 
-      int cnt =0;
-      int x = 0;
-      for (cnt=0; cnt < ARRAYSIZE; cnt++) {
-         if (pListX[taskid][cnt] < 90) {
-
-            //printf("task %d cnt %d valueX %f\n",taskid,cnt,pListX[taskid][cnt]);
-            //Form_Gradient(answer);
-         }
-      }
+      Save_Data(answer,taskid);
+      
 
       
    }
