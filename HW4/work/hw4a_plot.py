@@ -1,7 +1,7 @@
 from pylab import *
 from numpy import ma
 
-x,y,u,v = np.genfromtxt('/home/student/Homeworks/HW4/work/velocity.out', delimiter=',', unpack=True)
+x,y,u,v = np.genfromtxt('/home/student/Homeworks/HW4/test2/velocity3.out', delimiter=',', unpack=True)
 
 print "size of x is: " + str(len(x)) 
 print "size of y is: " + str(len(y)) 
