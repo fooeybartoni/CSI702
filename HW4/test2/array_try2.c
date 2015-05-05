@@ -16,11 +16,15 @@ double  dataY[ARRAYSIZE];
 double pListX[4][ARRAYSIZE];
 double pListY[4][ARRAYSIZE];
 
+
+
 struct partStruct {
    double x,y,velX,velY;
 };
 
 typedef struct partStruct Particle;
+
+Particle answer[ARRAYSIZE];
 
 // These may need to be not global
 double max_value;
@@ -49,7 +53,7 @@ double Partial_Derivative_Y(double x, double y) {
    return z;
 }
 
-void Form_Gradient(Particle *xycoord,int cnt) {
+void Form_Gradient(Particle xycoord[], size_t size) {
 
    int i,j,k;
    i=0;
@@ -60,7 +64,7 @@ void Form_Gradient(Particle *xycoord,int cnt) {
    max_value=0.0;
    double magnitude=0.0;
 
-   for (i=0; i<cnt; i++) {
+   for (i=0; i<ARRAYSIZE; i++) {
       
       double px = xycoord[i].x;
       double py = xycoord[i].y;
@@ -82,6 +86,8 @@ void Form_Gradient(Particle *xycoord,int cnt) {
 
    printf("Maximum Vector Magnitude is: %f\n",max_value);
    printf("Delta_x is: %f, Time step is: %f\n",delta_x,time_step);
+
+  
 }
 
 void Save_Data(Particle *xycoord,int cnt) {
@@ -216,6 +222,8 @@ void Save_Data(Particle *xycoord,int cnt) {
 
    if (taskid > MASTER) {
 
+      int i = 0;
+
       /* Receive my portion of array from the master task */
       source = MASTER;
       
@@ -224,9 +232,31 @@ void Save_Data(Particle *xycoord,int cnt) {
       MPI_Recv(&pListY[taskid][0], ARRAYSIZE, MPI_DOUBLE, source, tag2, 
       MPI_COMM_WORLD, &status);
       
-      printf("hello I am in %d dataX item is %f\n",taskid,pListX[taskid][0]);
-      printf("hello I am in %d dataY item is %f\n",taskid,pListY[taskid][0]);
+      //printf("hello I am in %d dataX item is %f\n",taskid,pListX[taskid][0]);
+      //printf("hello I am in %d dataY item is %f\n",taskid,pListY[taskid][0]);
 
+      // Initialize the Particle Array
+      for (i=0; i < ARRAYSIZE; i++) {
+         answer[i].x = pListX[taskid][i];
+         answer[i].y = pListY[taskid][i];
+         answer[i].velX = 0.0;
+         answer[i].velY = 0.0;
+      }
+
+      Form_Gradient(answer,ARRAYSIZE);
+      //answer = Form_Gradient(answer);
+
+      printf("Answer x: %f, velX: %f", answer[0].x,answer[0].velX);
+
+      int cnt =0;
+      int x = 0;
+      for (cnt=0; cnt < ARRAYSIZE; cnt++) {
+         if (pListX[taskid][cnt] < 90) {
+
+            //printf("task %d cnt %d valueX %f\n",taskid,cnt,pListX[taskid][cnt]);
+            //Form_Gradient(answer);
+         }
+      }
 
       
    }
