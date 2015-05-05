@@ -154,9 +154,12 @@ void Save_Data() {
 
 int main(int argc, char *argv[]) {
 
-   int   numtasks, taskid, rc, dest, offset, i, j, tag1,
+   int   numtasks, taskid, rc, dest, i, j, tag1,
       tag2, source, chunksize, cnt; 
    MPI_Status status;
+   
+   int offset[3];
+
    int p0Cnt,p1Cnt,p2Cnt,p3Cnt;
    p0Cnt=0;
    p1Cnt=1;
@@ -184,14 +187,6 @@ int main(int argc, char *argv[]) {
            array_of_types, &particle_type);
        MPI_Type_commit(&particle_type);
    }
-
-            //Particle *buffer;
-            //int size;
-            //MPI_Send(buffer, size,
-            //    particle_type, neighbor,
-            //    PARTICLE_TAG, MPI_COMM_WORLD);
-
-
    
 
    MPI_Init(&argc, &argv);
@@ -252,34 +247,19 @@ int main(int argc, char *argv[]) {
       printf("Initialized array cnt of %d\n",p1Cnt);
       qsort(xycoord, numParts, sizeof(xycoord[0]), SortFunc);
       
-
-      // use a simpler transport array of primitives
       int dest=1;
-      offset=p0Cnt;
+      offset={p0Cnt,p0Cnt+p1Cnt,p0Cnt+p1Cnt+p2Cnt};
       chunksize=p1Cnt;
-
-      //double transX1[p1Cnt];
-      //double transY1[p1Cnt];
-      //int cntT = 0;
-      //for (i=offset; i<offset+chunksize; i++) {
-       //  transX1[cntT] = xycoord[i].x;
-      //   transY1[cntT] = xycoord[i].y;
-      //   printf("x: %f\n y: %f",transX1[cntT],transY1[cntT]);
-      //   cntT = cntT + 1;
-     // }
 
       /* Send each task its portion of the array - master keeps 1st part */
          
       // Send P1 set
-      MPI_Send(&offset, 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
+      MPI_Send(&offset[0], 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
       MPI_Send(&xycoord[0], chunksize, particle_type, dest, tag2, MPI_COMM_WORLD);
       printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset);
 
-         //int source = 1;
-         //MPI_Recv(&offset, 1, MPI_INT, source, tag1, MPI_COMM_WORLD, &status);
-         //MPI_Recv(&xycoord[offset], chunksize, MPI_FLOAT, source, tag2,
-         //MPI_COMM_WORLD, &status);
-         
+
+                
    }
 
 
