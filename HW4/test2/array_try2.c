@@ -6,12 +6,125 @@
 #define  MASTER      0
 #define XYMAX 2.0
 #define XYMIN -2.0
+#define A 1
+#define B 1
+#define NUMGRID 4
 
-   double  dataX[ARRAYSIZE];
-   double  dataY[ARRAYSIZE];
+double  dataX[ARRAYSIZE];
+double  dataY[ARRAYSIZE];
 
-   double pListX[4][ARRAYSIZE];
-   double pListY[4][ARRAYSIZE];
+double pListX[4][ARRAYSIZE];
+double pListY[4][ARRAYSIZE];
+
+struct partStruct {
+   double x,y,velX,velY;
+};
+
+typedef struct partStruct Particle;
+
+// These may need to be not global
+double max_value;
+double time_step;
+double delta_x,delta_y;
+
+   //function implementation
+double hwFunc(double x, double y) {
+   double z;
+   z = A * x  + B * (x / (pow(x,2) + pow(y,2)));
+   
+   return z;
+}
+
+double Partial_Derivative_X(double x, double y) {
+   double H = (XYMAX - XYMIN)/ARRAYSIZE;
+   double z;
+   z = (hwFunc(x + H, y) - hwFunc(x-H,y)) / (2.0 * H); 
+   return z;
+}
+
+double Partial_Derivative_Y(double x, double y) {
+   double K = (XYMAX - XYMIN)/ARRAYSIZE;
+   double z;
+   z = (hwFunc(x, y + K) - hwFunc(x,y-K)) / (2.0 * K); 
+   return z;
+}
+
+void Form_Gradient(Particle *xycoord,int cnt) {
+
+   int i,j,k;
+   i=0;
+   j=0;
+   k=0;
+   double xGrad,yGrad,small_i,small_j;
+   
+   max_value=0.0;
+   double magnitude=0.0;
+
+   for (i=0; i<cnt; i++) {
+      
+      double px = xycoord[i].x;
+      double py = xycoord[i].y;
+      xGrad=Partial_Derivative_X(px,py);
+      xycoord[i].velX = xGrad;
+      yGrad=Partial_Derivative_Y(px,py);
+      xycoord[i].velY = yGrad;
+      magnitude = sqrt(pow(xGrad,2)+pow(yGrad,2));
+      //printf("X: %f Y: %f GradX: %f  GradY: %f  Magnitude: %f\n",px,py,xGrad,yGrad,magnitude);
+         
+      if (fabs(magnitude) > max_value)
+      {
+         max_value = fabs(magnitude);
+      }
+      delta_x = delta_y = ((XYMAX - XYMIN)/NUMGRID);  // This is the 100 x 100 grid from HW #3
+      int CFL =1;
+      time_step = delta_x/max_value; 
+   }
+
+   printf("Maximum Vector Magnitude is: %f\n",max_value);
+   printf("Delta_x is: %f, Time step is: %f\n",delta_x,time_step);
+}
+
+void Save_Data(Particle *xycoord,int cnt) {
+
+   FILE * fpVelocity;
+   FILE * fpTimeStep;
+   
+   int i,j;
+   i=0;
+   j=0;
+
+   if((fpVelocity=fopen("velocity.out", "w+"))==NULL) {
+    printf("Cannot open file fpX.\n");
+   }
+
+   if((fpTimeStep=fopen("time_step.out", "w+"))==NULL) {
+    printf("Cannot open file fpX.\n");
+   }
+
+   fprintf(fpTimeStep,"%f",time_step);
+
+   for (i=0; i<ARRAYSIZE; i++) {
+          
+      fprintf(fpVelocity,"%f,",xycoord[i].x);
+      fprintf(fpVelocity,"%f,",xycoord[i].y);
+      fprintf(fpVelocity,"%f,",xycoord[i].velX);
+      fprintf(fpVelocity,"%f",xycoord[i].velY);
+      
+      if (i != ARRAYSIZE-1) {
+         fprintf(fpVelocity,"\n");         
+      }
+   }
+   
+   fclose(fpVelocity);
+   fclose(fpTimeStep);
+}
+
+/* ########################################################   
+
+      Below is the MAIN section including the MPI Portion
+
+   ########################################################
+*/
 
    int main(int argc, char *argv[]) {
 
@@ -27,7 +140,7 @@
       printf("Quitting. Number of MPI tasks must be divisible by 4.\n");
       MPI_Abort(MPI_COMM_WORLD, rc);
       exit(0);
-      }
+   }
    MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
    printf ("MPI task %d has started...\n", taskid);
    chunksize = (ARRAYSIZE / numtasks);
@@ -92,9 +205,9 @@
       offset = chunksize;
 
       for (dest=1; dest<numtasks; dest++) {
- 
-         //MPI_Send(&offset, 1, MPI_INT, dest, tag1, MPI_COMM_WORLD);
+
          MPI_Send(&pListX[dest][0], ARRAYSIZE, MPI_DOUBLE, dest, tag2, MPI_COMM_WORLD);
+         MPI_Send(&pListY[dest][0], ARRAYSIZE, MPI_DOUBLE, dest, tag2, MPI_COMM_WORLD);
          
          printf("Sent %d elements to task %d offset= %d\n",chunksize,dest,offset);
          offset = offset + chunksize;
@@ -105,11 +218,16 @@
 
       /* Receive my portion of array from the master task */
       source = MASTER;
-      //MPI_Recv(&offset, 1, MPI_INT, source, tag1, MPI_COMM_WORLD, &status);
+      
       MPI_Recv(&pListX[taskid][0], ARRAYSIZE, MPI_DOUBLE, source, tag2, 
+      MPI_COMM_WORLD, &status);
+      MPI_Recv(&pListY[taskid][0], ARRAYSIZE, MPI_DOUBLE, source, tag2, 
       MPI_COMM_WORLD, &status);
       
       printf("hello I am in %d dataX item is %f\n",taskid,pListX[taskid][0]);
+      printf("hello I am in %d dataY item is %f\n",taskid,pListY[taskid][0]);
+
+
       
    }
 
