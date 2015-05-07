@@ -8,7 +8,9 @@
 double L = 1.0;			
 int N = 32;			
 
-double *u, *u_new;		
+double *u, *u_new;
+
+double *gradX, *gradY;		
 
 /* macro to convert 2D Array to a 1D array */
 #define INDEX(i,j) ((N+2)*(i)+(j))
@@ -26,12 +28,114 @@ void make_domains ( int num_procs );
 double *make_rhs ( );
 
 /* Function Definitions */
+void Form_Gradient(int num_procs, double f[]) {
+  double h;
+  int i;
+  int j;
+  MPI_Request request[4];
+  int requests;
+  MPI_Status status[4];
+/*
+  H is the lattice spacing.
+*/
+  h = L / ( double ) ( N + 1 );
+/* 
+  Update overlays using non-blocking send/receive 
+*/
+  requests = 0;
+
+  if ( left_proc[my_rank] >= 0 && left_proc[my_rank] < num_procs ) 
+  {
+    MPI_Irecv ( u + INDEX(i_min[my_rank] - 1, 1), N, MPI_DOUBLE,
+      left_proc[my_rank], 0, MPI_COMM_WORLD,
+      request + requests++ );
+
+    MPI_Isend ( u + INDEX(i_min[my_rank], 1), N, MPI_DOUBLE,
+      left_proc[my_rank], 1, MPI_COMM_WORLD,
+      request + requests++ );
+  }
+
+  if ( right_proc[my_rank] >= 0 && right_proc[my_rank] < num_procs ) 
+  {
+    MPI_Irecv ( u + INDEX(i_max[my_rank] + 1, 1), N, MPI_DOUBLE,
+      right_proc[my_rank], 1, MPI_COMM_WORLD,
+      request + requests++ );
+
+    MPI_Isend ( u + INDEX(i_max[my_rank], 1), N, MPI_DOUBLE,
+      right_proc[my_rank], 0, MPI_COMM_WORLD,
+      request + requests++ );
+  }
+/* 
+  Gradient calculations for internal vertices in my domain.
+*/
+  for ( i = i_min[my_rank] + 1; i <= i_max[my_rank] - 1; i++ )
+  {
+    for ( j = 1; j <= N; j++ )
+    {
+      gradX[INDEX(i,j)] =
+         ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+
+      gradY[INDEX(i,j)] =
+         ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+
+    }
+  }
+
+  /* 
+  Wait for all non-blocking communications to complete.
+*/
+  MPI_Waitall ( requests, request, status );
+/* 
+  Update gradient calculations for boundary vertices in my domain.
+*/
+  i = i_min[my_rank];
+  for ( j = 1; j <= N; j++ )
+  {
+    gradX[INDEX(i,j)] =
+          ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+
+    gradY[INDEX(i,j)] =
+          ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+
+  }
+
+  i = i_max[my_rank];
+  if (i != i_min[my_rank])
+  {
+    for (j = 1; j <= N; j++)
+    {
+      gradX[INDEX(i,j)] =
+         ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+
+      gradY[INDEX(i,j)] =
+         ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+
+    }
+  }
+
+  return;
+
+  
+}
+
 void allocate_arrays ( ) 
 {
   int i;
   int ndof;
 
   ndof = ( N + 2 ) * ( N + 2 );
+
+  gradX = ( double * ) malloc ( ndof * sizeof ( double ) );
+  for ( i = 0; i < ndof; i++)
+  {
+    gradX[i] = 0.0;
+  }
+
+  gradY = ( double * ) malloc ( ndof * sizeof ( double ) );
+  for ( i = 0; i < ndof; i++ )
+  {
+    gradY[i] = 0.0;
+  }
 
   u = ( double * ) malloc ( ndof * sizeof ( double ) );
   for ( i = 0; i < ndof; i++)
@@ -65,20 +169,7 @@ double *make_rhs ( )
   {
     f[i] = 0.0;
   }
- /*
-  q = 10.0;
-
-  i = 1 + N / 4;
-  j = i;
-  k = INDEX ( i, j );
-  f[k] = q;
-
-  i = 1 + 3 * N / 4;
-  j = i;
-  k = INDEX ( i, j );
-  f[k] = -q;
-*/
-
+ 
   for ( j = 0; j < N; j++ )
   {
     
@@ -278,7 +369,7 @@ void make_domains ( int num_procs )
   return;
 }
 
-void Save_Data(double grad[],int myTaskId) {
+void Save_Data(char* name,double grad[],int myTaskId) {
 
    FILE * fpGradient;
       
@@ -287,8 +378,8 @@ void Save_Data(double grad[],int myTaskId) {
    j=0;
 
    char buffer[16];
-      
-   sprintf(buffer, "function%d.out", myTaskId);
+     
+   sprintf(buffer, "%s%d.out", name,myTaskId);
    
 
    if((fpGradient=fopen(buffer, "w+"))==NULL) {
@@ -415,10 +506,16 @@ int main ( int argc, char *argv[] )
     u_new = swap;
   } while ( epsilon < change );
 
+  Form_Gradient(num_procs, f);
+
 /* 
-  Each process writes out a file
+  Each process writes out a file the solution and gradient
 */
-  Save_Data(u_new,my_rank);
+  Save_Data("solution",u_new,my_rank);
+
+  Save_Data("gradientX",gradX,my_rank);
+
+  Save_Data("gradientY",gradY,my_rank);
 
 /*
   Terminate MPI.
