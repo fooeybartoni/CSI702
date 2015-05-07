@@ -95,7 +95,7 @@ double *make_rhs ( )
         f[INDEX(i,j)] = phi1;
       }
       /* top and bottom */
-      if ( j == 0 || j == N - 1 )
+      if ( j == 1 || j == N - 1 )
       {
         f[INDEX(i,j)] = (((1 - (double)(i)/N)*phi0) + ((((double)(i)/N)) * phi1) ) ;
       }
@@ -288,7 +288,7 @@ void Save_Data(double grad[],int myTaskId) {
 
    char buffer[16];
       
-   sprintf(buffer, "gradient%d.out", myTaskId);
+   sprintf(buffer, "function%d.out", myTaskId);
    
 
    if((fpGradient=fopen(buffer, "w+"))==NULL) {
@@ -299,7 +299,7 @@ void Save_Data(double grad[],int myTaskId) {
     {
       for ( j = 1; j <= N; j++ )
       {   
-         fprintf(fpGradient,"hello %d, %d, %f\n",i,j,grad[INDEX(i,j)]);
+         fprintf(fpGradient,"%d, %d, %f\n",i,j,grad[INDEX(i,j)]);
       }
    }
    
