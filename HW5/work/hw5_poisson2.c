@@ -3,248 +3,30 @@
 # include <stdlib.h>
 # include <math.h>
 # include <string.h>
-# include <time.h>
 
 
+double L = 1.0;			
+int N = 32;			
 
-double L = 1.0;			/* linear size of square region */
-int N = 32;			/* number of interior points per dim */
+double *u, *u_new;		
 
-double *u, *u_new;		/* linear arrays to hold solution */
-
-/* macro to index into a 2-D (N+2)x(N+2) array */
+/* macro to convert 2D Array to a 1D array */
 #define INDEX(i,j) ((N+2)*(i)+(j))
 
-int my_rank;			/* rank of this process */
+int my_rank;		
 
-int *proc;			/* process indexed by vertex */
-int *i_min, *i_max;		/* min, max vertex indices of processes */
-int *left_proc, *right_proc;	/* processes to left and right */
-
+int *proc;			
+int *i_min, *i_max;		
+int *left_proc, *right_proc;	
 
 int main ( int argc, char *argv[] );
 void allocate_arrays ( );
 void jacobi ( int num_procs, double f[] );
 void make_domains ( int num_procs );
-double *make_source ( );
-void timestamp ( );
+double *make_rhs ( );
 
-/############################################################################
-
-  Code Main Section with the MPI Portion
-
-/############################################################################
-
-int main ( int argc, char *argv[] ) 
-
-
-/*
-  Purpose:
-
-    MAIN is the main program for POISSON_MPI.
-
-  Discussion:
-
-    This program solves Poisson's equation in a 2D region.
-
-    The Jacobi iterative method is used to solve the linear system.
-
-    MPI is used for parallel execution, with the domain divided
-    into strips.
-
-  Modified:
-
-    22 September 2013
-
-  Local parameters:
-
-    Local, double F[(N+2)x(N+2)], the source term.
-
-    Local, int N, the number of interior vertices in one dimension.
-
-    Local, int NUM_PROCS, the number of MPI processes.
-
-    Local, double U[(N+2)*(N+2)], a solution estimate.
-
-    Local, double U_NEW[(N+2)*(N+2)], a solution estimate.
-*/
-{
-  double change;
-  double epsilon = 1.0E-03;
-  double *f;
-  char file_name[100];
-  int i;
-  int j;
-  double my_change;
-  int my_n;
-  int n;
-  int num_procs;
-  int step;
-  double *swap;
-  double wall_time;
-/*
-  MPI initialization.
-*/
-  MPI_Init ( &argc, &argv );
-
-  MPI_Comm_size ( MPI_COMM_WORLD, &num_procs );
-
-  MPI_Comm_rank ( MPI_COMM_WORLD, &my_rank );
-/*
-  Read commandline arguments, if present.
-*/
-  if ( 1 < argc )
-  {
-    sscanf ( argv[1], "%d", &N );
-  }
-  else
-  {
-    N = 32;
-  }
-
-  if ( 2 < argc )
-  {
-    sscanf ( argv[2], "%lf", &epsilon );
-  }
-  else
-  {
-    epsilon = 1.0E-03;
-  }
-  if ( 3 < argc )
-  {
-    strcpy ( file_name, argv[3] );
-  }
-  else
-  {
-    strcpy ( file_name, "poisson_mpi.out" );
-  }
-/*
-  Print out initial information.
-*/
-  if ( my_rank == 0 ) 
-  {
-    timestamp ( );
-    printf ( "\n" );
-    printf ( "POISSON_MPI:\n" );
-    printf ( "  C version\n" );
-    printf ( "  2-D Poisson equation using Jacobi algorithm\n" );
-    printf ( "  ===========================================\n" );
-    printf ( "  MPI version: 1-D domains, non-blocking send/receive\n" );
-    printf ( "  Number of processes         = %d\n", num_procs );
-    printf ( "  Number of interior vertices = %d\n", N );
-    printf ( "  Desired fractional accuracy = %f\n", epsilon );
-    printf ( "\n" );
-  }
-
-  allocate_arrays ( );
-  f = make_source ( );
-  make_domains ( num_procs );
-
-  step = 0;
-/*
-  Begin timing.
-*/
-  wall_time = MPI_Wtime ( );
-/*
-  Begin iteration.
-*/
-  do 
-  {
-    jacobi ( num_procs, f );
-    ++step;
-/* 
-  Estimate the error 
-*/
-    change = 0.0;
-    n = 0;
-
-    my_change = 0.0;
-    my_n = 0;
-
-    for ( i = i_min[my_rank]; i <= i_max[my_rank]; i++ )
-    {
-      for ( j = 1; j <= N; j++ )
-      {
-        if ( u_new[INDEX(i,j)] != 0.0 ) 
-        {
-          my_change = my_change 
-            + fabs ( 1.0 - u[INDEX(i,j)] / u_new[INDEX(i,j)] );
-
-          my_n = my_n + 1;
-        }
-      }
-    }
-    MPI_Allreduce ( &my_change, &change, 1, MPI_DOUBLE, MPI_SUM,
-      MPI_COMM_WORLD );
-
-    MPI_Allreduce ( &my_n, &n, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
-
-    if ( n != 0 )
-    {
-      change = change / n;
-    }
-    if ( my_rank == 0 && ( step % 10 ) == 0 ) 
-    {
-      printf ( "  N = %d, n = %d, my_n = %d, Step %4d  Error = %g\n", N, n, my_n, step, change );
-    }
-/* 
-  Interchange U and U_NEW.
-*/
-    swap = u;
-    u = u_new;
-    u_new = swap;
-  } while ( epsilon < change );
-
-/* 
-  Here is where you can copy the solution to process 0 
-  and print to a file.
-*/
-
-/*
-  Report on wallclock time.
-*/
-  wall_time = MPI_Wtime() - wall_time;
-  if ( my_rank == 0 )
-  {
-    printf ( "\n" );
-    printf ( "  Wall clock time = %f secs\n", wall_time );
-  }
-/*
-  Terminate MPI.
-*/
-  MPI_Finalize ( );
-/*
-  Free memory.
-*/
-  free ( f );
-/*
-  Terminate.
-*/
-  if ( my_rank == 0 )
-  {
-    printf ( "\n" );
-    printf ( "POISSON_MPI:\n" );
-    printf ( "  Normal end of execution.\n" );
-    printf ( "\n" );
-    timestamp ( );
-  }
- 
-  return 0;
-}
-/******************************************************************************/
-
+/* Function Definitions */
 void allocate_arrays ( ) 
-
-/******************************************************************************/
-/*
-  Purpose:
-
-    ALLOCATE_ARRAYS creates and zeros out the arrays U and U_NEW.
-
-  Modified:
-
-    10 September 2013
-*/
 {
   int i;
   int ndof;
@@ -265,26 +47,70 @@ void allocate_arrays ( )
 
   return;
 }
-/******************************************************************************/
+
+/* Set up all of the RHS border and the inner using function provided */
+double *make_rhs ( ) 
+{
+  double *f;
+  int i;
+  int j;
+  int k;
+  double q;
+  double phi0 = -10.0;
+  double phi1 = 10.0;
+
+  f = ( double * ) malloc ( ( N + 2 ) * ( N + 2 ) * sizeof ( double ) );
+
+  for ( i = 0; i < ( N + 2 ) * ( N + 2 ); i++ )
+  {
+    f[i] = 0.0;
+  }
+ /*
+  q = 10.0;
+
+  i = 1 + N / 4;
+  j = i;
+  k = INDEX ( i, j );
+  f[k] = q;
+
+  i = 1 + 3 * N / 4;
+  j = i;
+  k = INDEX ( i, j );
+  f[k] = -q;
+*/
+
+  for ( j = 0; j < N; j++ )
+  {
+    
+    for ( i = 0; i < N; i++ )
+    {
+      /* Left boundary */
+      if ( i == 0 )
+      {
+        f[INDEX(i,j)] = phi0;
+      }
+      /* Right boundary */
+      if ( i == N - 1 )
+      {
+        f[INDEX(i,j)] = phi1;
+      }
+      /* top and bottom */
+      if ( j == 0 || j == N - 1 )
+      {
+        f[INDEX(i,j)] = (((1 - (double)(i)/N)*phi0) + ((((double)(i)/N)) * phi1) ) ;
+      }
+      else
+      {
+        
+        f[INDEX(i,j)]=0.0;
+      }
+    }
+  }
+
+  return f;
+}
 
 void jacobi ( int num_procs, double f[] ) 
-
-/******************************************************************************/
-/*
-  Purpose:
-
-    JACOBI carries out the Jacobi iteration for the linear system.
-
-  Modified:
-
-    16 September 2013
-
-  Parameters:
-
-    Input, int NUM_PROCS, the number of processes.
-
-    Input, double F[(N+2)*(N+2)], the right hand side of the linear system.
-*/
 {
   double h;
   int i;
@@ -365,24 +191,8 @@ void jacobi ( int num_procs, double f[] )
 
   return;
 }
-/******************************************************************************/
 
 void make_domains ( int num_procs ) 
-
-/******************************************************************************/
-/*
-  Purpose:
-
-    MAKE_DOMAINS sets up the information defining the process domains.
-
-  Modified:
-
-    10 September 2013
-
-  Parameters:
-
-    Input, int NUM_PROCS, the number of processes.
-*/
 {
   double d;
   double eps;
@@ -467,99 +277,157 @@ void make_domains ( int num_procs )
 
   return;
 }
-/******************************************************************************/
 
-double *make_source ( ) 
+void Save_Data(double grad[],int myTaskId) {
 
-/******************************************************************************/
-/*
-  Purpose:
+   FILE * fpGradient;
+      
+   int i,j;
+   i=0;
+   j=0;
 
-    MAKE_SOURCE sets up the source term for the Poisson equation.
+   char buffer[16];
+      
+   sprintf(buffer, "gradient%d.out", myTaskId);
+   
 
-  Modified:
+   if((fpGradient=fopen(buffer, "w+"))==NULL) {
+    printf("Cannot open file fpX.\n");
+   }
 
-    16 September 2013
+   for ( i = i_min[my_rank]; i <= i_max[my_rank]; i++ )
+    {
+      for ( j = 1; j <= N; j++ )
+      {   
+         fprintf(fpGradient,"hello %d, %d, %f\n",i,j,grad[INDEX(i,j)]);
+      }
+   }
+   
+   fclose(fpGradient);
+}
 
-  Parameters:
+double error_per_id ( int N,int my_rank, double a[] )
 
-    Output, double *MAKE_SOURCE, a pointer to the (N+2)*(N+2) source term
-    array.
-*/
 {
-  double *f;
   int i;
   int j;
-  int k;
-  double q;
+  double err;
 
-  f = ( double * ) malloc ( ( N + 2 ) * ( N + 2 ) * sizeof ( double ) );
+  err = 0.0;
 
-  for ( i = 0; i < ( N + 2 ) * ( N + 2 ); i++ )
+  int low = i_min[my_rank];
+  int high = i_max[my_rank];
+
+  printf("low is %d high is %d",low,high);
+
+  for ( i = low; i <= high; i++ )
   {
-    f[i] = 0.0;
+    for ( j = 1; j <= N; j++ )
+    {
+      err = err + a[INDEX(i,j)] * a[INDEX(i,j)];
+      //printf("err %f a %f\n",err,a[INDEX(i,j)]);
+    }
   }
-/* 
-  Make a dipole.
-*/
-  q = 10.0;
-
-  i = 1 + N / 4;
-  j = i;
-  k = INDEX ( i, j );
-  f[k] = q;
-
-  i = 1 + 3 * N / 4;
-  j = i;
-  k = INDEX ( i, j );
-  f[k] = -q;
-
-  return f;
+  
+  return err;
 }
-/******************************************************************************/
 
-void timestamp ( )
 
-/******************************************************************************/
-/*
-  Purpose:
 
-    TIMESTAMP prints the current YMDHMS date as a time stamp.
+int main ( int argc, char *argv[] ) 
 
-  Example:
-
-    31 May 2001 09:45:54 AM
-
-  Licensing:
-
-    This code is distributed under the GNU LGPL license. 
-
-  Modified:
-
-    24 September 2003
-
-  Author:
-
-    John Burkardt
-
-  Parameters:
-
-    None
-*/
 {
-# define TIME_SIZE 40
+  double change;
+  double epsilon = 1.0E-03;
+  double *f;
+  char file_name[100];
+  int i;
+  int j;
+  int num_procs;
+  int step;
+  double *swap;
+  double my_change;
+  int my_n;
+  int n;
+  
+/*
+  MPI initialization.
+*/
+  MPI_Init ( &argc, &argv );
 
-  static char time_buffer[TIME_SIZE];
-  const struct tm *tm;
-  time_t now;
+  MPI_Comm_size ( MPI_COMM_WORLD, &num_procs );
 
-  now = time ( NULL );
-  tm = localtime ( &now );
+  MPI_Comm_rank ( MPI_COMM_WORLD, &my_rank );
 
-  strftime ( time_buffer, TIME_SIZE, "%d %B %Y %I:%M:%S %p", tm );
+  allocate_arrays ( );
+  f = make_rhs ( );
+  make_domains ( num_procs );
 
-  printf ( "%s\n", time_buffer );
+  step = 0;
 
-  return;
-# undef TIME_SIZE
+/*
+  Begin iteration.
+*/
+  do 
+  {
+    jacobi ( num_procs, f );
+    ++step;
+/* 
+  Estimate the error 
+*/
+    change = 0.0;
+    n = 0;
+
+    my_change = 0.0;
+    my_n = 0;
+
+    for ( i = i_min[my_rank]; i <= i_max[my_rank]; i++ )
+    {
+      for ( j = 1; j <= N; j++ )
+      {
+        if ( u_new[INDEX(i,j)] != 0.0 ) 
+        {
+          my_change = my_change 
+            + fabs ( 1.0 - u[INDEX(i,j)] / u_new[INDEX(i,j)] );
+
+          my_n = my_n + 1;
+        }
+      }
+    }
+    MPI_Allreduce ( &my_change, &change, 1, MPI_DOUBLE, MPI_SUM,
+      MPI_COMM_WORLD );
+
+    MPI_Allreduce ( &my_n, &n, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
+
+    if ( n != 0 )
+    {
+      change = change / n;
+    }
+    if ( my_rank == 0 && ( step % 10 ) == 0 ) 
+    {
+      printf ( "  N = %d, n = %d, my_n = %d, Step %4d  Error = %g\n", N, n, my_n, step, change );
+    }
+/* 
+  Interchange U and U_NEW.
+*/
+    swap = u;
+    u = u_new;
+    u_new = swap;
+  } while ( epsilon < change );
+
+/* 
+  Each process writes out a file
+*/
+  Save_Data(u_new,my_rank);
+
+/*
+  Terminate MPI.
+*/
+  MPI_Finalize ( );
+/*
+  Free memory.
+*/
+  free ( f );
+ 
+  return 0;
 }

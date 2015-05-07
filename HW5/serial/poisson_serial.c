@@ -130,6 +130,7 @@ int main ( int argc, char *argv[] )
       }
     }
   }
+
   unew_norm = r8mat_rms ( nx, ny, unew );
 /*
   Set up the exact solution.
@@ -214,6 +215,13 @@ int main ( int argc, char *argv[] )
   if ( converged )
   {
     printf ( "  The iteration has converged.\n" );
+    for ( j = 0; j < ny; j++ )
+    {
+      for ( i = 0; i < nx; i++ )
+      {
+        printf("x: %d y: %d gradient: %f\n",i,j,unew[i][j]);
+      }
+    }
   }
   else
   {
