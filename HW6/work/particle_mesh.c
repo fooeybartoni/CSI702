@@ -4,6 +4,34 @@
 # include <math.h>
 # include <string.h>
 
+#define  ARRAYSIZE   100
+#define  MASTER      0
+#define XYMAX 8.0
+#define XYMIN -8.0
+#define A 1
+#define B 1
+#define NUMGRID 4
+#define MAXMASS 12.0
+
+double  dataX[ARRAYSIZE];
+double  dataY[ARRAYSIZE];
+
+double pListX[4][ARRAYSIZE];
+double pListY[4][ARRAYSIZE];
+
+struct partStruct {
+   double x,y,velX,velY,mass;
+};
+
+typedef struct partStruct Particle;
+
+Particle *parts;
+
+// These may need to be not global
+double max_value;
+double time_step;
+double delta_x,delta_y;
+
 
 double L = 1.0;			
 int N = 32;			
@@ -26,6 +54,32 @@ void allocate_arrays ( );
 void jacobi ( int num_procs, double f[] );
 void make_domains ( int num_procs );
 double *make_rhs ( );
+
+void make_particles() {
+  int i;
+  parts = ( Particle * ) malloc ( ARRAYSIZE * sizeof ( Particle ) );
+    
+  srand(time(NULL));
+
+  double range = (XYMAX - XYMIN); 
+  double div = RAND_MAX / range;
+      
+  for (i=0; i<ARRAYSIZE; i++){
+    
+    parts[i].x = XYMIN + (rand() / div);
+    parts[i].y = XYMIN + (rand() / div);
+    parts[i].velX = 0;
+    parts[i].velY = 0;
+    parts[i].mass = rand() / (RAND_MAX/MAXMASS);
+
+    printf("%f, %f, %f, %f, %f\n",
+      parts[i].x,
+      parts[i].y,
+      parts[i].velX,
+      parts[i].velY,
+      parts[i].mass);
+  }
+}
 
 /* Function Definitions */
 void Form_Gradient(int num_procs, double f[]) {
@@ -397,6 +451,33 @@ void Save_Data(char* name,double grad[],int myTaskId) {
    fclose(fpGradient);
 }
 
+void Save_Particle_Data(char* name,Particle p[],int myTaskId) {
+  FILE * partOut;
+      
+  int i;
+  i=0;
+   
+  char buffer[16];
+     
+  sprintf(buffer, "%s%d.out", name,myTaskId);
+   
+
+  if((partOut=fopen(buffer, "w+"))==NULL) {
+    printf("Cannot open file fpX.\n");
+  }
+
+  for ( i = 0; i <= ARRAYSIZE; i++ )
+  {
+    fprintf(partOut,"%d, %d, %f\n",
+      p[i].x,
+      p[i].y,
+      p[i].mass);
+  }
+   
+  fclose(partOut);
+}
+
+
 double error_per_id ( int N,int my_rank, double a[] )
 
 {
@@ -422,6 +503,14 @@ double error_per_id ( int N,int my_rank, double a[] )
   
   return err;
 }
+
+MPI_Datatype create_particle_datatype()
+   {
+      MPI_Datatype particle_type;
+      MPI_Type_contiguous (3,MPI_DOUBLE,&particle_type);
+      MPI_Type_commit (&particle_type);
+      return particle_type;
+   }
 
 
 
@@ -449,6 +538,12 @@ int main ( int argc, char *argv[] )
   MPI_Comm_size ( MPI_COMM_WORLD, &num_procs );
 
   MPI_Comm_rank ( MPI_COMM_WORLD, &my_rank );
+
+  if (my_rank == 0) {
+    printf("my rank is %d\n", my_rank);
+    make_particles();
+    exit(0);
+  }
 
   allocate_arrays ( );
   f = make_rhs ( );
@@ -511,11 +606,13 @@ int main ( int argc, char *argv[] )
 /* 
   Each process writes out a file the solution and gradient
 */
-  Save_Data("solution",u_new,my_rank);
+  //Save_Data("solution",u_new,my_rank);
 
-  Save_Data("gradientX",gradX,my_rank);
+  //Save_Data("gradientX",gradX,my_rank);
 
-  Save_Data("gradientY",gradY,my_rank);
+  //Save_Data("gradientY",gradY,my_rank);
+
+  Save_Particle_Data("initParts",parts,my_rank);
 
 /*
   Terminate MPI.

@@ -139,20 +139,20 @@ void Save_Data(Particle xycoord[],int myTaskId) {
 MPI_Datatype create_particle_datatype()
    {
       MPI_Datatype particle_type;
-       MPI_Datatype array_of_types[1];
-       int array_of_blocklengths[1];
-       MPI_Aint array_of_displacements[1],lb,extent;
-       MPI_Type_get_extent(MPI_DOUBLE, &lb, &extent);
+      MPI_Datatype array_of_types[1];
+      int array_of_blocklengths[1];
+      MPI_Aint array_of_displacements[1],lb,extent;
+      MPI_Type_get_extent(MPI_DOUBLE, &lb, &extent);
 
-       /* Create MPI Datatype for Particle struct*/
-       array_of_types[0] = MPI_DOUBLE;
-       array_of_blocklengths[0] = 4;
-       array_of_displacements[0] = 0;
+      /* Create MPI Datatype for Particle struct*/
+      array_of_types[0] = MPI_DOUBLE;
+      array_of_blocklengths[0] = 4;
+      array_of_displacements[0] = 0;
        
-       MPI_Type_create_struct(2, array_of_blocklengths, array_of_displacements,
+      MPI_Type_create_struct(2, array_of_blocklengths, array_of_displacements,
            array_of_types, &particle_type);
-       MPI_Type_commit(&particle_type);
-       return particle_type;
+      MPI_Type_commit(&particle_type);
+      return particle_type;
    }
 
 /* ########################################################   
