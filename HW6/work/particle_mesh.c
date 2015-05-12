@@ -6,26 +6,29 @@
 
 #define  ARRAYSIZE   100
 #define  MASTER      0
-#define XYMAX 8.0
-#define XYMIN -8.0
+#define XYMAX 1.0
+#define XYMIN 0.0
 #define A 1
 #define B 1
-#define NUMGRID 4
-#define MAXMASS 12.0
+#define NUMPROC 4
+#define MINCHG -1.0
+#define MAXCHG 1.0
 
 double  dataX[ARRAYSIZE];
 double  dataY[ARRAYSIZE];
+
+double gridPtChg[ARRAYSIZE];
 
 double pListX[4][ARRAYSIZE];
 double pListY[4][ARRAYSIZE];
 
 struct partStruct {
-   double x,y,velX,velY,mass;
+   double x,y,velX,velY,charge;
 };
 
 typedef struct partStruct Particle;
 
-Particle *parts;
+Particle parts[NUMPROC][ARRAYSIZE];
 
 // These may need to be not global
 double max_value;
@@ -38,47 +41,175 @@ int N = 32;
 
 double *u, *u_new;
 
-double *gradX, *gradY;		
+double *gradX, *gradY;	
 
-/* macro to convert 2D Array to a 1D array */
 #define INDEX(i,j) ((N+2)*(i)+(j))
 
-int my_rank;		
+int my_rank;    
 
-int *proc;			
-int *i_min, *i_max;		
-int *left_proc, *right_proc;	
+int *proc;      
+int *i_min, *i_max;   
+int *left_proc, *right_proc;  
 
-int main ( int argc, char *argv[] );
-void allocate_arrays ( );
-void jacobi ( int num_procs, double f[] );
-void make_domains ( int num_procs );
-double *make_rhs ( );
 
-void make_particles() {
-  int i;
-  parts = ( Particle * ) malloc ( ARRAYSIZE * sizeof ( Particle ) );
-    
+/*
+    Functions
+*/
+
+void make_particles(int my_rank) {
+  int i=0;
+  
+/*
+  H is the lattice spacing.
+*/
+  //h = L / ( double ) ( N + 1 ); 
+
+printf("made it into make_particles\n");
+
   srand(time(NULL));
 
   double range = (XYMAX - XYMIN); 
   double div = RAND_MAX / range;
+/*
+  for (i=0; i<ARRAYSIZE; i++){
+    parts[my_rank][i].x = 0.0;
+    parts[my_rank][i].y = 0.0;
+    parts[my_rank][i].velX = 0.0;
+    parts[my_rank][i].velY = 0.0;
+    parts[my_rank][i].charge = 0.0;
+  }
       
+  */
+
   for (i=0; i<ARRAYSIZE; i++){
     
-    parts[i].x = XYMIN + (rand() / div);
-    parts[i].y = XYMIN + (rand() / div);
-    parts[i].velX = 0;
-    parts[i].velY = 0;
-    parts[i].mass = rand() / (RAND_MAX/MAXMASS);
+    parts[my_rank][i].x = XYMIN + (rand() / div );
+    parts[my_rank][i].y = XYMIN + (rand() / div );
+    parts[my_rank][i].velX = 0.1;
+    parts[my_rank][i].velY = 0.1;
+    parts[my_rank][i].charge = MINCHG + (rand() / div);
 
-    printf("%f, %f, %f, %f, %f\n",
-      parts[i].x,
-      parts[i].y,
-      parts[i].velX,
-      parts[i].velY,
-      parts[i].mass);
+    printf("%d --- %f, %f, %f, %f, %f\n",i,
+      parts[my_rank][i].x,
+      parts[my_rank][i].y,
+      parts[my_rank][i].velX,
+      parts[my_rank][i].velY,
+      parts[my_rank][i].charge);
+
   }
+
+  printf("just before return in make_particles\n");
+  return;
+}
+
+
+void calc_grid_charges(int num_procs, int my_rank) {
+  
+  printf("in the calc grid method\n");
+
+  double h,px,py=0;
+  int i,j,k;
+  
+  MPI_Request request[4];
+  int requests;
+  MPI_Status status[4];
+/*
+  H is the lattice spacing.
+*/
+  h = L / ( double ) ( N + 1 );
+/* 
+  Update overlays using non-blocking send/receive 
+*/
+  requests = 0;
+/*
+  if ( left_proc[my_rank] >= 0 && left_proc[my_rank] < num_procs ) 
+  {
+    MPI_Irecv ( u + INDEX(i_min[my_rank] - 1, 1), N, MPI_DOUBLE,
+      left_proc[my_rank], 0, MPI_COMM_WORLD,
+      request + requests++ );
+
+    MPI_Isend ( u + INDEX(i_min[my_rank], 1), N, MPI_DOUBLE,
+      left_proc[my_rank], 1, MPI_COMM_WORLD,
+      request + requests++ );
+  }
+
+  if ( right_proc[my_rank] >= 0 && right_proc[my_rank] < num_procs ) 
+  {
+    MPI_Irecv ( u + INDEX(i_max[my_rank] + 1, 1), N, MPI_DOUBLE,
+      right_proc[my_rank], 1, MPI_COMM_WORLD,
+      request + requests++ );
+
+    MPI_Isend ( u + INDEX(i_max[my_rank], 1), N, MPI_DOUBLE,
+      right_proc[my_rank], 0, MPI_COMM_WORLD,
+      request + requests++ );
+  }
+
+/* 
+  Gradient calculations for internal vertices in my domain.
+*/
+  int count = 0;
+  printf("before the loop in calc_grid_charges\n");
+  for ( i = i_min[my_rank] + 1; i <= i_max[my_rank] - 1; i++ )
+  {
+    for ( j = 1; j <= N; j++ )
+    {
+      // Find all of the charged particles around the point
+      // iterate over the array
+      //   - calculate partial charge using distance from 
+      //    ratio = h - dist from grid pt / grid pt diagonal dist
+      //    * charge
+      // 
+      //gridPtChg[INDEX(i,j)] = 
+
+      for (k=0; k<ARRAYSIZE; k++) {
+        px = fabs((double)(i)/(N+1) - parts[my_rank][k].x);
+        py = fabs((double)(j)/(N+1) - parts[my_rank][k].y);
+        //printf("h is: %f and i*h is %f and parts.k.x is %f\n",h, (double)i*h,parts[k].x);
+        //printf("px is: %f and py is %f\n",px,py);
+        if (  px < h && py < h ) {
+          printf("wow, x is: %f, part_x is: %f\n",px, 
+            parts[my_rank][k].x);
+          count += 1;
+        }
+      } 
+     }
+  }
+  printf("rank is %dcount of particles to grid points is %d\n",my_rank,count);
+  /* 
+  Wait for all non-blocking communications to complete.
+*/
+  MPI_Waitall ( requests, request, status );
+/* 
+  Update gradient calculations for boundary vertices in my domain.
+*
+
+
+  i = i_min[my_rank];
+  for ( j = 1; j <= N; j++ )
+  {
+    gradX[INDEX(i,j)] =
+          ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+
+    gradY[INDEX(i,j)] =
+          ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+
+  }
+
+  i = i_max[my_rank];
+  if (i != i_min[my_rank])
+  {
+    for (j = 1; j <= N; j++)
+    {
+      gradX[INDEX(i,j)] =
+         ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+
+      gradY[INDEX(i,j)] =
+         ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+
+    }
+  }
+*/
+  return;
 }
 
 /* Function Definitions */
@@ -209,13 +340,15 @@ void allocate_arrays ( )
 /* Set up all of the RHS border and the inner using function provided */
 double *make_rhs ( ) 
 {
+
+  // MADE ALL ZEROS to start off with
   double *f;
   int i;
   int j;
   int k;
   double q;
-  double phi0 = -10.0;
-  double phi1 = 10.0;
+  double phi0 = 0.0;
+  double phi1 = 0.0;
 
   f = ( double * ) malloc ( ( N + 2 ) * ( N + 2 ) * sizeof ( double ) );
 
@@ -242,7 +375,7 @@ double *make_rhs ( )
       /* top and bottom */
       if ( j == 1 || j == N - 1 )
       {
-        f[INDEX(i,j)] = (((1 - (double)(i)/N)*phi0) + ((((double)(i)/N)) * phi1) ) ;
+        f[INDEX(i,j)] = 0.0;
       }
       else
       {
@@ -466,12 +599,14 @@ void Save_Particle_Data(char* name,Particle p[],int myTaskId) {
     printf("Cannot open file fpX.\n");
   }
 
-  for ( i = 0; i <= ARRAYSIZE; i++ )
+  for ( i = 0; i < ARRAYSIZE; i++ )
   {
-    fprintf(partOut,"%d, %d, %f\n",
+    fprintf(partOut,"%f, %f, %f, %f, %f\n",
       p[i].x,
       p[i].y,
-      p[i].mass);
+      p[i].velX,
+      p[i].velY,
+      p[i].charge);
   }
    
   fclose(partOut);
@@ -507,7 +642,7 @@ double error_per_id ( int N,int my_rank, double a[] )
 MPI_Datatype create_particle_datatype()
    {
       MPI_Datatype particle_type;
-      MPI_Type_contiguous (3,MPI_DOUBLE,&particle_type);
+      MPI_Type_contiguous (5,MPI_DOUBLE,&particle_type);
       MPI_Type_commit (&particle_type);
       return particle_type;
    }
@@ -539,28 +674,36 @@ int main ( int argc, char *argv[] )
 
   MPI_Comm_rank ( MPI_COMM_WORLD, &my_rank );
 
-  if (my_rank == 0) {
-    printf("my rank is %d\n", my_rank);
-    make_particles();
-    exit(0);
-  }
+  
 
   allocate_arrays ( );
   f = make_rhs ( );
   make_domains ( num_procs );
 
-  step = 0;
+
+printf("I got past prior inits\n");
+  step = 0;  //what is this?
+
+  if (my_rank == 0) {
+    //printf("my rank is %d\n", my_rank);
+    //make_particles();
+    //printf("made it past make particles\n");
+    //calc_grid_charges(num_procs);
+    //exit(0);
+  }
+  make_particles(my_rank);
+  calc_grid_charges(num_procs,my_rank);
 
 /*
   Begin iteration.
-*/
+*
   do 
   {
     jacobi ( num_procs, f );
     ++step;
 /* 
   Estimate the error 
-*/
+*
     change = 0.0;
     n = 0;
 
@@ -595,7 +738,7 @@ int main ( int argc, char *argv[] )
     }
 /* 
   Interchange U and U_NEW.
-*/
+*
     swap = u;
     u = u_new;
     u_new = swap;
@@ -612,7 +755,7 @@ int main ( int argc, char *argv[] )
 
   //Save_Data("gradientY",gradY,my_rank);
 
-  Save_Particle_Data("initParts",parts,my_rank);
+  
 
 /*
   Terminate MPI.
@@ -621,7 +764,8 @@ int main ( int argc, char *argv[] )
 /*
   Free memory.
 */
-  free ( f );
+  //free ( f );
+  
  
   return 0;
 }
