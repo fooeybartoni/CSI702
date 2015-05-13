@@ -6,12 +6,12 @@
 
 #define  ARRAYSIZE   100
 #define  MASTER      0
-#define XYMAX 1.0
+#define XYMAX 33.0
 #define XYMIN 0.0
 #define A 1
 #define B 1
 #define NUMPROC 4
-#define MINCHG -1.0
+#define MINCHG 0.0
 #define MAXCHG 1.0
 
 double  dataX[ARRAYSIZE];
@@ -23,7 +23,7 @@ double pListX[4][ARRAYSIZE];
 double pListY[4][ARRAYSIZE];
 
 struct partStruct {
-   double x,y,velX,velY,charge;
+   double x,y,fX,fY,charge;
 };
 
 typedef struct partStruct Particle;
@@ -36,12 +36,14 @@ double time_step;
 double delta_x,delta_y;
 
 
-double L = 1.0;			
+double L = XYMAX - XYMIN;			
 int N = 32;			
 
 double *u, *u_new;
 
-double *gradX, *gradY;	
+double *eFieldX, *eFieldY;
+
+double *rho;	
 
 #define INDEX(i,j) ((N+2)*(i)+(j))
 
@@ -50,6 +52,12 @@ int my_rank;
 int *proc;      
 int *i_min, *i_max;   
 int *left_proc, *right_proc;  
+
+int main ( int argc, char *argv[] );
+void allocate_arrays ( );
+void jacobi ( int num_procs, double f[] );
+void make_domains ( int num_procs );
+double *make_rhs ( );
 
 
 /*
@@ -66,34 +74,25 @@ void make_particles(int my_rank) {
 
 printf("made it into make_particles\n");
 
-  srand(time(NULL));
+  srand(time(NULL) * rand() * (rand()/RAND_MAX+my_rank));
 
   double range = (XYMAX - XYMIN); 
   double div = RAND_MAX / range;
-/*
-  for (i=0; i<ARRAYSIZE; i++){
-    parts[my_rank][i].x = 0.0;
-    parts[my_rank][i].y = 0.0;
-    parts[my_rank][i].velX = 0.0;
-    parts[my_rank][i].velY = 0.0;
-    parts[my_rank][i].charge = 0.0;
-  }
-      
-  */
+
 
   for (i=0; i<ARRAYSIZE; i++){
     
     parts[my_rank][i].x = XYMIN + (rand() / div );
     parts[my_rank][i].y = XYMIN + (rand() / div );
-    parts[my_rank][i].velX = 0.1;
-    parts[my_rank][i].velY = 0.1;
-    parts[my_rank][i].charge = MINCHG + (rand() / div);
+    parts[my_rank][i].fX = 0.1;
+    parts[my_rank][i].fY = 0.1;
+    parts[my_rank][i].charge = MINCHG + (rand() / (RAND_MAX + 1.0));
 
     printf("%d --- %f, %f, %f, %f, %f\n",i,
       parts[my_rank][i].x,
       parts[my_rank][i].y,
-      parts[my_rank][i].velX,
-      parts[my_rank][i].velY,
+      parts[my_rank][i].fX,
+      parts[my_rank][i].fY,
       parts[my_rank][i].charge);
 
   }
@@ -107,7 +106,8 @@ void calc_grid_charges(int num_procs, int my_rank) {
   
   printf("in the calc grid method\n");
 
-  double h,px,py=0;
+  double dblpx, dblpy,h=0.0;
+  int px,py=0;
   int i,j,k;
   
   MPI_Request request[4];
@@ -117,103 +117,97 @@ void calc_grid_charges(int num_procs, int my_rank) {
   H is the lattice spacing.
 */
   h = L / ( double ) ( N + 1 );
-/* 
-  Update overlays using non-blocking send/receive 
-*/
-  requests = 0;
-/*
-  if ( left_proc[my_rank] >= 0 && left_proc[my_rank] < num_procs ) 
-  {
-    MPI_Irecv ( u + INDEX(i_min[my_rank] - 1, 1), N, MPI_DOUBLE,
-      left_proc[my_rank], 0, MPI_COMM_WORLD,
-      request + requests++ );
-
-    MPI_Isend ( u + INDEX(i_min[my_rank], 1), N, MPI_DOUBLE,
-      left_proc[my_rank], 1, MPI_COMM_WORLD,
-      request + requests++ );
-  }
-
-  if ( right_proc[my_rank] >= 0 && right_proc[my_rank] < num_procs ) 
-  {
-    MPI_Irecv ( u + INDEX(i_max[my_rank] + 1, 1), N, MPI_DOUBLE,
-      right_proc[my_rank], 1, MPI_COMM_WORLD,
-      request + requests++ );
-
-    MPI_Isend ( u + INDEX(i_max[my_rank], 1), N, MPI_DOUBLE,
-      right_proc[my_rank], 0, MPI_COMM_WORLD,
-      request + requests++ );
-  }
 
 /* 
-  Gradient calculations for internal vertices in my domain.
+  Charge calculations for internal vertices in my domain.
 */
   int count = 0;
-  printf("before the loop in calc_grid_charges\n");
-  for ( i = i_min[my_rank] + 1; i <= i_max[my_rank] - 1; i++ )
-  {
-    for ( j = 1; j <= N; j++ )
-    {
-      // Find all of the charged particles around the point
-      // iterate over the array
-      //   - calculate partial charge using distance from 
-      //    ratio = h - dist from grid pt / grid pt diagonal dist
-      //    * charge
-      // 
-      //gridPtChg[INDEX(i,j)] = 
+  //printf("before the loop in calc_grid_charges\n");
+  
+  // Find all of the charged particles around the point
+  // iterate over the array
+  //   - calculate partial charge using distance from 
+  //    ratio = h - dist from grid pt / grid pt diagonal dist
+  //    * charge
+  // 
 
-      for (k=0; k<ARRAYSIZE; k++) {
-        px = fabs((double)(i)/(N+1) - parts[my_rank][k].x);
-        py = fabs((double)(j)/(N+1) - parts[my_rank][k].y);
-        //printf("h is: %f and i*h is %f and parts.k.x is %f\n",h, (double)i*h,parts[k].x);
-        //printf("px is: %f and py is %f\n",px,py);
-        if (  px < h && py < h ) {
-          printf("wow, x is: %f, part_x is: %f\n",px, 
-            parts[my_rank][k].x);
-          count += 1;
-        }
-      } 
-     }
+  for (k=0; k<ARRAYSIZE; k++) {
+    dblpx = (parts[my_rank][k].x/h)+1;
+    dblpy = (parts[my_rank][k].y/h/h)+1;
+    px = (int)dblpx;
+    py = (int)dblpy;
+    rho[INDEX(px,py)] += parts[my_rank][k].y/(h*h);
+    //printf("h is %f, dbl of x is %f, dbl of y is %f\n",h,dblpx,dblpy);
+    //printf("x is %d, y is %d, rho is %f\n",px,py,rho[INDEX(px,py)]);
+   
   }
-  printf("rank is %dcount of particles to grid points is %d\n",my_rank,count);
-  /* 
-  Wait for all non-blocking communications to complete.
+ 
+  return;
+}
+
+void calc_forces(int num_procs, int my_rank) {
+  
+  printf("in the calc forces method\n");
+  /* Calculate the force given the charge and the Electric field
+         F = qE
+  */
+
+  double dblpx, dblpy,h=0.0;
+  int px,py=0;
+  int i,j,k;
+  double q, eX, eY = 0.0;
+  
+  MPI_Request request[4];
+  int requests;
+  MPI_Status status[4];
+/*
+  H is the lattice spacing.
 */
-  MPI_Waitall ( requests, request, status );
+  h = L / ( double ) ( N + 1 );
+
 /* 
-  Update gradient calculations for boundary vertices in my domain.
-*
-
-
-  i = i_min[my_rank];
-  for ( j = 1; j <= N; j++ )
-  {
-    gradX[INDEX(i,j)] =
-          ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
-
-    gradY[INDEX(i,j)] =
-          ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
-
-  }
-
-  i = i_max[my_rank];
-  if (i != i_min[my_rank])
-  {
-    for (j = 1; j <= N; j++)
-    {
-      gradX[INDEX(i,j)] =
-         ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
-
-      gradY[INDEX(i,j)] =
-         ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
-
-    }
-  }
+  Charge calculations for internal vertices in my domain.
 */
+  int count = 0;
+  printf("before the loop in calc_forces\n");
+  
+  // Find all of the charged particles around the point
+  // iterate over the array
+  //   - calculate partial charge using distance from 
+  //    ratio = h - dist from grid pt / grid pt diagonal dist
+  //    * charge
+  // 
+
+  for (k=0; k<ARRAYSIZE; k++) {
+    dblpx = (parts[my_rank][k].x/h)+1;
+    dblpy = (parts[my_rank][k].y/h/h)+1;
+    px = (int)dblpx;
+    py = (int)dblpy;
+    
+    q = parts[my_rank][k].charge;
+    eX = eFieldX[INDEX(px,py)];
+    eY = eFieldY[INDEX(px,py)];
+
+    printf("q is %f, eX is %f, eY is %f\n",q, eX, eY);
+
+    // This can be expanded to interpolation of four corner grid points 
+    parts[my_rank][k].fX = q * eX;
+    parts[my_rank][k].fY = q * eY;
+
+    
+    printf("x is %d, y is %d, fX is %f, fY is %f\n",px,py,
+      parts[my_rank][k].fX,parts[my_rank][k].fY );
+  }
+ 
   return;
 }
 
 /* Function Definitions */
-void Form_Gradient(int num_procs, double f[]) {
+void Form_E_Field(int num_procs, double f[]) {
+  /* The Electric Field is the negative of the Potential which is the
+     Gradient from Homework #5
+  */
+
   double h;
   int i;
   int j;
@@ -257,10 +251,10 @@ void Form_Gradient(int num_procs, double f[]) {
   {
     for ( j = 1; j <= N; j++ )
     {
-      gradX[INDEX(i,j)] =
+      eFieldX[INDEX(i,j)] = -1.0 *
          ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
 
-      gradY[INDEX(i,j)] =
+      eFieldY[INDEX(i,j)] = -1.0 *
          ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
 
     }
@@ -276,10 +270,10 @@ void Form_Gradient(int num_procs, double f[]) {
   i = i_min[my_rank];
   for ( j = 1; j <= N; j++ )
   {
-    gradX[INDEX(i,j)] =
+    eFieldX[INDEX(i,j)] = -1.0 *
           ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
 
-    gradY[INDEX(i,j)] =
+    eFieldY[INDEX(i,j)] = -1.0 *
           ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
 
   }
@@ -289,10 +283,10 @@ void Form_Gradient(int num_procs, double f[]) {
   {
     for (j = 1; j <= N; j++)
     {
-      gradX[INDEX(i,j)] =
+      eFieldX[INDEX(i,j)] = -1.0 *
          ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
 
-      gradY[INDEX(i,j)] =
+      eFieldY[INDEX(i,j)] = -1.0 *
          ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
 
     }
@@ -310,16 +304,22 @@ void allocate_arrays ( )
 
   ndof = ( N + 2 ) * ( N + 2 );
 
-  gradX = ( double * ) malloc ( ndof * sizeof ( double ) );
+  rho = ( double * ) malloc ( ndof * sizeof ( double ) );
   for ( i = 0; i < ndof; i++)
   {
-    gradX[i] = 0.0;
+    rho[i] = 0.0;
   }
 
-  gradY = ( double * ) malloc ( ndof * sizeof ( double ) );
+  eFieldX = ( double * ) malloc ( ndof * sizeof ( double ) );
+  for ( i = 0; i < ndof; i++)
+  {
+    eFieldX[i] = 0.0;
+  }
+
+  eFieldY = ( double * ) malloc ( ndof * sizeof ( double ) );
   for ( i = 0; i < ndof; i++ )
   {
-    gradY[i] = 0.0;
+    eFieldY[i] = 0.0;
   }
 
   u = ( double * ) malloc ( ndof * sizeof ( double ) );
@@ -347,8 +347,8 @@ double *make_rhs ( )
   int j;
   int k;
   double q;
-  double phi0 = 0.0;
-  double phi1 = 0.0;
+  double phi0 = -10.0;
+  double phi1 = 10.0;
 
   f = ( double * ) malloc ( ( N + 2 ) * ( N + 2 ) * sizeof ( double ) );
 
@@ -375,7 +375,8 @@ double *make_rhs ( )
       /* top and bottom */
       if ( j == 1 || j == N - 1 )
       {
-        f[INDEX(i,j)] = 0.0;
+        //f[INDEX(i,j)] = 0.0;
+        f[INDEX(i,j)] = (((1 - (double)(i)/N)*phi0) + ((((double)(i)/N)) * phi1) ) ;
       }
       else
       {
@@ -604,8 +605,8 @@ void Save_Particle_Data(char* name,Particle p[],int myTaskId) {
     fprintf(partOut,"%f, %f, %f, %f, %f\n",
       p[i].x,
       p[i].y,
-      p[i].velX,
-      p[i].velY,
+      p[i].fX,
+      p[i].fY,
       p[i].charge);
   }
    
@@ -681,29 +682,29 @@ int main ( int argc, char *argv[] )
   make_domains ( num_procs );
 
 
-printf("I got past prior inits\n");
+//printf("I got past prior inits\n");
   step = 0;  //what is this?
 
-  if (my_rank == 0) {
-    //printf("my rank is %d\n", my_rank);
-    //make_particles();
-    //printf("made it past make particles\n");
-    //calc_grid_charges(num_procs);
+  //if (my_rank == 0) {
+    printf("my rank is %d\n", my_rank);
+    make_particles(my_rank);
+    printf("made it past make particles\n");
+    calc_grid_charges(num_procs, my_rank);
     //exit(0);
-  }
-  make_particles(my_rank);
-  calc_grid_charges(num_procs,my_rank);
+  //}
+  //make_particles(my_rank);
+ // calc_grid_charges(num_procs,my_rank);
 
 /*
   Begin iteration.
-*
+*/
   do 
   {
-    jacobi ( num_procs, f );
+    jacobi ( num_procs, rho );
     ++step;
 /* 
   Estimate the error 
-*
+*/
     change = 0.0;
     n = 0;
 
@@ -738,23 +739,26 @@ printf("I got past prior inits\n");
     }
 /* 
   Interchange U and U_NEW.
-*
+*/
     swap = u;
     u = u_new;
     u_new = swap;
   } while ( epsilon < change );
 
-  Form_Gradient(num_procs, f);
+  Form_E_Field(num_procs, f);
+
+  calc_forces(num_procs,my_rank);
 
 /* 
   Each process writes out a file the solution and gradient
 */
-  //Save_Data("solution",u_new,my_rank);
+  Save_Data("solution",u_new,my_rank);
 
-  //Save_Data("gradientX",gradX,my_rank);
+  Save_Data("gradientX",eFieldX,my_rank);
 
-  //Save_Data("gradientY",gradY,my_rank);
+  Save_Data("gradientY",eFieldY,my_rank);
 
+  Save_Data("charges",rho,my_rank);
   
 
 /*
@@ -764,7 +768,7 @@ printf("I got past prior inits\n");
 /*
   Free memory.
 */
-  //free ( f );
+  free ( f );
   
  
   return 0;
