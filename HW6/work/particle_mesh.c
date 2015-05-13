@@ -28,6 +28,8 @@ struct partStruct {
 
 typedef struct partStruct Particle;
 
+
+
 Particle parts[NUMPROC][ARRAYSIZE];
 
 // These may need to be not global
@@ -55,16 +57,22 @@ int *left_proc, *right_proc;
 
 int main ( int argc, char *argv[] );
 void allocate_arrays ( );
-void jacobi ( int num_procs, double f[] );
+void jacobi ( int num_procs, double rho[] );
 void make_domains ( int num_procs );
-double *make_rhs ( );
+double *make_rho ( );
+void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId);
+void Save_Data(char* name,double grad[],int myTaskId);
+void make_particles(int num_procs,int my_rank);
+void calc_grid_charges(int num_procs, int my_rank);
+void calc_forces(int num_procs);
+void Form_E_Field(int num_procs, double u_new[]);
 
 
 /*
     Functions
 */
 
-void make_particles(int my_rank) {
+void make_particles(int num_procs,int my_rank) {
   int i=0;
   
 /*
@@ -76,24 +84,26 @@ printf("made it into make_particles\n");
 
   srand(time(NULL) * rand() * (rand()/RAND_MAX+my_rank));
 
-  double range = (XYMAX - XYMIN); 
-  double div = RAND_MAX / range;
+  double range = (XYMAX - 1 - XYMIN); 
+  double div = (RAND_MAX / range);
+  double skip = range/num_procs;
 
 
   for (i=0; i<ARRAYSIZE; i++){
     
-    parts[my_rank][i].x = XYMIN + (rand() / div );
+    parts[my_rank][i].x = XYMIN + (my_rank * skip) + (rand() / div )/num_procs;
     parts[my_rank][i].y = XYMIN + (rand() / div );
     parts[my_rank][i].fX = 0.1;
     parts[my_rank][i].fY = 0.1;
     parts[my_rank][i].charge = MINCHG + (rand() / (RAND_MAX + 1.0));
-
-    printf("%d --- %f, %f, %f, %f, %f\n",i,
-      parts[my_rank][i].x,
-      parts[my_rank][i].y,
-      parts[my_rank][i].fX,
-      parts[my_rank][i].fY,
-      parts[my_rank][i].charge);
+    //if (my_rank == 0 && i%10 == 0) {
+    {  printf("%d --- rank %d %f, %f, %f, %f, %f\n",i,my_rank,
+        parts[my_rank][i].x,
+        parts[my_rank][i].y,
+        parts[my_rank][i].fX,
+        parts[my_rank][i].fY,
+        parts[my_rank][i].charge);
+    }
 
   }
 
@@ -133,10 +143,10 @@ void calc_grid_charges(int num_procs, int my_rank) {
 
   for (k=0; k<ARRAYSIZE; k++) {
     dblpx = (parts[my_rank][k].x/h)+1;
-    dblpy = (parts[my_rank][k].y/h/h)+1;
+    dblpy = (parts[my_rank][k].y/h)+1;
     px = (int)dblpx;
     py = (int)dblpy;
-    rho[INDEX(px,py)] += parts[my_rank][k].y/(h*h);
+    rho[INDEX(px,py)] += parts[my_rank][k].charge/(h*h);
     //printf("h is %f, dbl of x is %f, dbl of y is %f\n",h,dblpx,dblpy);
     //printf("x is %d, y is %d, rho is %f\n",px,py,rho[INDEX(px,py)]);
    
@@ -145,12 +155,17 @@ void calc_grid_charges(int num_procs, int my_rank) {
   return;
 }
 
-void calc_forces(int num_procs, int my_rank) {
+void calc_forces(int num_procs) {
   
+
+Save_Data("eFieldX_test",eFieldX,my_rank);
+
   printf("in the calc forces method\n");
   /* Calculate the force given the charge and the Electric field
          F = qE
   */
+
+//int my_rank =0;
 
   double dblpx, dblpy,h=0.0;
   int px,py=0;
@@ -179,15 +194,16 @@ void calc_forces(int num_procs, int my_rank) {
   // 
 
   for (k=0; k<ARRAYSIZE; k++) {
-    dblpx = (parts[my_rank][k].x/h)+1;
-    dblpy = (parts[my_rank][k].y/h/h)+1;
+    dblpx = ((parts[my_rank][k].x)/h)+1;
+    dblpy = ((parts[my_rank][k].y)/h)+1;
     px = (int)dblpx;
     py = (int)dblpy;
     
     q = parts[my_rank][k].charge;
+
     eX = eFieldX[INDEX(px,py)];
     eY = eFieldY[INDEX(px,py)];
-
+    printf("my calc_forces rank is %d",my_rank);
     printf("q is %f, eX is %f, eY is %f\n",q, eX, eY);
 
     // This can be expanded to interpolation of four corner grid points 
@@ -195,7 +211,7 @@ void calc_forces(int num_procs, int my_rank) {
     parts[my_rank][k].fY = q * eY;
 
     
-    printf("x is %d, y is %d, fX is %f, fY is %f\n",px,py,
+    printf("rank is %d, x is %d, y is %d, fX is %f, fY is %f\n",my_rank,px,py,
       parts[my_rank][k].fX,parts[my_rank][k].fY );
   }
  
@@ -203,7 +219,7 @@ void calc_forces(int num_procs, int my_rank) {
 }
 
 /* Function Definitions */
-void Form_E_Field(int num_procs, double f[]) {
+void Form_E_Field(int num_procs, double u_new[]) {
   /* The Electric Field is the negative of the Potential which is the
      Gradient from Homework #5
   */
@@ -225,22 +241,22 @@ void Form_E_Field(int num_procs, double f[]) {
 
   if ( left_proc[my_rank] >= 0 && left_proc[my_rank] < num_procs ) 
   {
-    MPI_Irecv ( u + INDEX(i_min[my_rank] - 1, 1), N, MPI_DOUBLE,
+    MPI_Irecv ( u_new + INDEX(i_min[my_rank] - 1, 1), N, MPI_DOUBLE,
       left_proc[my_rank], 0, MPI_COMM_WORLD,
       request + requests++ );
 
-    MPI_Isend ( u + INDEX(i_min[my_rank], 1), N, MPI_DOUBLE,
+    MPI_Isend ( u_new + INDEX(i_min[my_rank], 1), N, MPI_DOUBLE,
       left_proc[my_rank], 1, MPI_COMM_WORLD,
       request + requests++ );
   }
 
   if ( right_proc[my_rank] >= 0 && right_proc[my_rank] < num_procs ) 
   {
-    MPI_Irecv ( u + INDEX(i_max[my_rank] + 1, 1), N, MPI_DOUBLE,
+    MPI_Irecv ( u_new + INDEX(i_max[my_rank] + 1, 1), N, MPI_DOUBLE,
       right_proc[my_rank], 1, MPI_COMM_WORLD,
       request + requests++ );
 
-    MPI_Isend ( u + INDEX(i_max[my_rank], 1), N, MPI_DOUBLE,
+    MPI_Isend ( u_new + INDEX(i_max[my_rank], 1), N, MPI_DOUBLE,
       right_proc[my_rank], 0, MPI_COMM_WORLD,
       request + requests++ );
   }
@@ -252,10 +268,10 @@ void Form_E_Field(int num_procs, double f[]) {
     for ( j = 1; j <= N; j++ )
     {
       eFieldX[INDEX(i,j)] = -1.0 *
-         ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+         ( (u_new[INDEX(i+1,j)] - u_new[INDEX(i-1,j)]) / h);
 
       eFieldY[INDEX(i,j)] = -1.0 *
-         ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+         ( (u_new[INDEX(i,j+1)] - u_new[INDEX(i,j-1)]) / h);
 
     }
   }
@@ -271,10 +287,10 @@ void Form_E_Field(int num_procs, double f[]) {
   for ( j = 1; j <= N; j++ )
   {
     eFieldX[INDEX(i,j)] = -1.0 *
-          ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+          ( (u_new[INDEX(i+1,j)] - u_new[INDEX(i-1,j)]) / h);
 
     eFieldY[INDEX(i,j)] = -1.0 *
-          ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+          ( (u_new[INDEX(i,j+1)] - u_new[INDEX(i,j-1)]) / h);
 
   }
 
@@ -284,10 +300,10 @@ void Form_E_Field(int num_procs, double f[]) {
     for (j = 1; j <= N; j++)
     {
       eFieldX[INDEX(i,j)] = -1.0 *
-         ( (u[INDEX(i+1,j)] - u[INDEX(i-1,j)]) / h);
+         ( (u_new[INDEX(i+1,j)] - u_new[INDEX(i-1,j)]) / h);
 
       eFieldY[INDEX(i,j)] = -1.0 *
-         ( (u[INDEX(i,j+1)] - u[INDEX(i,j-1)]) / h);
+         ( (u_new[INDEX(i,j+1)] - u_new[INDEX(i,j-1)]) / h);
 
     }
   }
@@ -304,11 +320,11 @@ void allocate_arrays ( )
 
   ndof = ( N + 2 ) * ( N + 2 );
 
-  rho = ( double * ) malloc ( ndof * sizeof ( double ) );
-  for ( i = 0; i < ndof; i++)
-  {
-    rho[i] = 0.0;
-  }
+  //rho = ( double * ) malloc ( ndof * sizeof ( double ) );
+  //for ( i = 0; i < ndof; i++)
+  //{
+  //  rho[i] = 0.0;
+  //}
 
   eFieldX = ( double * ) malloc ( ndof * sizeof ( double ) );
   for ( i = 0; i < ndof; i++)
@@ -338,7 +354,7 @@ void allocate_arrays ( )
 }
 
 /* Set up all of the RHS border and the inner using function provided */
-double *make_rhs ( ) 
+double *make_rho ( ) 
 {
 
   // MADE ALL ZEROS to start off with
@@ -389,7 +405,7 @@ double *make_rhs ( )
   return f;
 }
 
-void jacobi ( int num_procs, double f[] ) 
+void jacobi ( int num_procs, double rho[] ) 
 {
   double h;
   int i;
@@ -437,7 +453,7 @@ void jacobi ( int num_procs, double f[] )
       u_new[INDEX(i,j)] =
         0.25 * ( u[INDEX(i-1,j)] + u[INDEX(i+1,j)] +
                  u[INDEX(i,j-1)] + u[INDEX(i,j+1)] +
-                 h * h * f[INDEX(i,j)] );
+                 h * h * rho[INDEX(i,j)] );
     }
   }
 /* 
@@ -453,7 +469,7 @@ void jacobi ( int num_procs, double f[] )
     u_new[INDEX(i,j)] =
       0.25 * ( u[INDEX(i-1,j)] + u[INDEX(i+1,j)] +
                u[INDEX(i,j-1)] + u[INDEX(i,j+1)] +
-               h * h * f[INDEX(i,j)] );
+               h * h * rho[INDEX(i,j)] );
   }
 
   i = i_max[my_rank];
@@ -464,7 +480,7 @@ void jacobi ( int num_procs, double f[] )
       u_new[INDEX(i,j)] =
         0.25 * ( u[INDEX(i-1,j)] + u[INDEX(i+1,j)] +
                  u[INDEX(i,j-1)] + u[INDEX(i,j+1)] +
-                 h * h * f[INDEX(i,j)] );
+                 h * h * rho[INDEX(i,j)] );
     }
   }
 
@@ -585,7 +601,7 @@ void Save_Data(char* name,double grad[],int myTaskId) {
    fclose(fpGradient);
 }
 
-void Save_Particle_Data(char* name,Particle p[],int myTaskId) {
+void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId) {
   FILE * partOut;
       
   int i;
@@ -603,42 +619,16 @@ void Save_Particle_Data(char* name,Particle p[],int myTaskId) {
   for ( i = 0; i < ARRAYSIZE; i++ )
   {
     fprintf(partOut,"%f, %f, %f, %f, %f\n",
-      p[i].x,
-      p[i].y,
-      p[i].fX,
-      p[i].fY,
-      p[i].charge);
+      p[myTaskId][i].x,
+      p[myTaskId][i].y,
+      p[myTaskId][i].fX,
+      p[myTaskId][i].fY,
+      p[myTaskId][i].charge);
   }
    
   fclose(partOut);
 }
 
-
-double error_per_id ( int N,int my_rank, double a[] )
-
-{
-  int i;
-  int j;
-  double err;
-
-  err = 0.0;
-
-  int low = i_min[my_rank];
-  int high = i_max[my_rank];
-
-  printf("low is %d high is %d",low,high);
-
-  for ( i = low; i <= high; i++ )
-  {
-    for ( j = 1; j <= N; j++ )
-    {
-      err = err + a[INDEX(i,j)] * a[INDEX(i,j)];
-      //printf("err %f a %f\n",err,a[INDEX(i,j)]);
-    }
-  }
-  
-  return err;
-}
 
 MPI_Datatype create_particle_datatype()
    {
@@ -655,7 +645,7 @@ int main ( int argc, char *argv[] )
 {
   double change;
   double epsilon = 1.0E-03;
-  double *f;
+  //double *f;
   char file_name[100];
   int i;
   int j;
@@ -678,7 +668,7 @@ int main ( int argc, char *argv[] )
   
 
   allocate_arrays ( );
-  f = make_rhs ( );
+  rho = make_rho ( );
   make_domains ( num_procs );
 
 
@@ -687,7 +677,7 @@ int main ( int argc, char *argv[] )
 
   //if (my_rank == 0) {
     printf("my rank is %d\n", my_rank);
-    make_particles(my_rank);
+    make_particles(num_procs,my_rank);
     printf("made it past make particles\n");
     calc_grid_charges(num_procs, my_rank);
     //exit(0);
@@ -745,20 +735,26 @@ int main ( int argc, char *argv[] )
     u_new = swap;
   } while ( epsilon < change );
 
-  Form_E_Field(num_procs, f);
+  Form_E_Field(num_procs,u_new);
 
-  calc_forces(num_procs,my_rank);
+
+
+  printf("just before calc_forces\n");
+
+  calc_forces(num_procs);
 
 /* 
   Each process writes out a file the solution and gradient
 */
   Save_Data("solution",u_new,my_rank);
 
-  Save_Data("gradientX",eFieldX,my_rank);
+  Save_Data("eFieldX",eFieldX,my_rank);
 
-  Save_Data("gradientY",eFieldY,my_rank);
+  Save_Data("eFieldY",eFieldY,my_rank);
 
-  Save_Data("charges",rho,my_rank);
+  Save_Data("voltages",rho,my_rank);
+
+  Save_Particle_Data("particles",parts,my_rank);
   
 
 /*
@@ -768,7 +764,7 @@ int main ( int argc, char *argv[] )
 /*
   Free memory.
 */
-  free ( f );
+  //free ( f );
   
  
   return 0;
