@@ -13,6 +13,7 @@
 #define NUMPROC 4
 #define MINCHG 0.0
 #define MAXCHG 1.0
+#define DUMMY 999.0
 
 double  dataX[ARRAYSIZE];
 double  dataY[ARRAYSIZE];
@@ -23,12 +24,12 @@ double pListX[4][ARRAYSIZE];
 double pListY[4][ARRAYSIZE];
 
 struct partStruct {
-   double x,y,fX,fY,charge;
+   double x,y,fX,fY,charge,velX,velY;
 };
 
 typedef struct partStruct Particle;
 
-
+MPI_Datatype particle_type;
 
 Particle parts[NUMPROC][ARRAYSIZE];
 
@@ -66,7 +67,8 @@ void make_particles(int num_procs,int my_rank);
 void calc_grid_charges(int num_procs, int my_rank);
 void calc_forces(int num_procs);
 void Form_E_Field(int num_procs, double u_new[]);
-
+void find_velocity(int my_rank,int proc_num);
+void do_Poissons(int num_procs);
 
 /*
     Functions
@@ -91,18 +93,42 @@ printf("made it into make_particles\n");
 
   for (i=0; i<ARRAYSIZE; i++){
     
-    parts[my_rank][i].x = XYMIN + (my_rank * skip) + (rand() / div )/num_procs;
-    parts[my_rank][i].y = XYMIN + (rand() / div );
-    parts[my_rank][i].fX = 0.1;
-    parts[my_rank][i].fY = 0.1;
-    parts[my_rank][i].charge = MINCHG + (rand() / (RAND_MAX + 1.0));
-    //if (my_rank == 0 && i%10 == 0) {
-    {  printf("%d --- rank %d %f, %f, %f, %f, %f\n",i,my_rank,
-        parts[my_rank][i].x,
-        parts[my_rank][i].y,
-        parts[my_rank][i].fX,
-        parts[my_rank][i].fY,
-        parts[my_rank][i].charge);
+    if (i<ARRAYSIZE/4) {
+      parts[my_rank][i].x = XYMIN + (my_rank * skip) + (rand() / div )/num_procs;
+      parts[my_rank][i].y = XYMIN + (rand() / div );
+      parts[my_rank][i].fX = 0.1;
+      parts[my_rank][i].fY = 0.1;
+      parts[my_rank][i].charge = MINCHG + (rand() / (RAND_MAX + 1.0));
+      parts[my_rank][i].velX = 0.1;
+      parts[my_rank][i].velY = 0.1;
+      //if (my_rank == 0 && i%10 == 0) {
+      {  printf("%d --- rank %d %f, %f, %f, %f, %f\n",i,my_rank,
+          parts[my_rank][i].x,
+          parts[my_rank][i].y,
+          parts[my_rank][i].fX,
+          parts[my_rank][i].fY,
+          parts[my_rank][i].charge);
+      }
+    }
+    else {
+      parts[my_rank][i].x = DUMMY;
+      parts[my_rank][i].y = DUMMY;
+      parts[my_rank][i].fX = 0.1;
+      parts[my_rank][i].fY = 0.1;
+      parts[my_rank][i].charge = MINCHG + (rand() / (RAND_MAX + 1.0));
+      parts[my_rank][i].velX = 0.1;
+      parts[my_rank][i].velY = 0.1;
+      //if (my_rank == 0 && i%10 == 0) {
+      {  printf("%d --- rank %d %f, %f, %f, %f, %f\n",i,my_rank,
+          parts[my_rank][i].x,
+          parts[my_rank][i].y,
+          parts[my_rank][i].fX,
+          parts[my_rank][i].fY,
+          parts[my_rank][i].charge);
+      }
+
+
+
     }
 
   }
@@ -142,14 +168,15 @@ void calc_grid_charges(int num_procs, int my_rank) {
   // 
 
   for (k=0; k<ARRAYSIZE; k++) {
-    dblpx = (parts[my_rank][k].x/h)+1;
-    dblpy = (parts[my_rank][k].y/h)+1;
-    px = (int)dblpx;
-    py = (int)dblpy;
-    rho[INDEX(px,py)] += parts[my_rank][k].charge/(h*h);
-    //printf("h is %f, dbl of x is %f, dbl of y is %f\n",h,dblpx,dblpy);
-    //printf("x is %d, y is %d, rho is %f\n",px,py,rho[INDEX(px,py)]);
-   
+    if (parts[my_rank][k].x < DUMMY) {
+      dblpx = (parts[my_rank][k].x/h)+1;
+      dblpy = (parts[my_rank][k].y/h)+1;
+      px = (int)dblpx;
+      py = (int)dblpy;
+      rho[INDEX(px,py)] += parts[my_rank][k].charge/(h*h);
+      //printf("h is %f, dbl of x is %f, dbl of y is %f\n",h,dblpx,dblpy);
+      //printf("x is %d, y is %d, rho is %f\n",px,py,rho[INDEX(px,py)]);
+    }
   }
  
   return;
@@ -194,28 +221,65 @@ Save_Data("eFieldX_test",eFieldX,my_rank);
   // 
 
   for (k=0; k<ARRAYSIZE; k++) {
-    dblpx = ((parts[my_rank][k].x)/h)+1;
-    dblpy = ((parts[my_rank][k].y)/h)+1;
-    px = (int)dblpx;
-    py = (int)dblpy;
-    
-    q = parts[my_rank][k].charge;
+    if (parts[my_rank][k].x < DUMMY) {
+      dblpx = ((parts[my_rank][k].x)/h)+1;
+      dblpy = ((parts[my_rank][k].y)/h)+1;
+      px = (int)dblpx;
+      py = (int)dblpy;
+      
+      q = parts[my_rank][k].charge;
 
-    eX = eFieldX[INDEX(px,py)];
-    eY = eFieldY[INDEX(px,py)];
-    printf("my calc_forces rank is %d",my_rank);
-    printf("q is %f, eX is %f, eY is %f\n",q, eX, eY);
+      eX = eFieldX[INDEX(px,py)];
+      eY = eFieldY[INDEX(px,py)];
+      printf("my calc_forces rank is %d",my_rank);
+      printf("q is %f, eX is %f, eY is %f\n",q, eX, eY);
 
-    // This can be expanded to interpolation of four corner grid points 
-    parts[my_rank][k].fX = q * eX;
-    parts[my_rank][k].fY = q * eY;
+      // This can be expanded to interpolation of four corner grid points 
+      parts[my_rank][k].fX = q * eX;
+      parts[my_rank][k].fY = q * eY;
 
-    
-    printf("rank is %d, x is %d, y is %d, fX is %f, fY is %f\n",my_rank,px,py,
-      parts[my_rank][k].fX,parts[my_rank][k].fY );
+      
+      printf("rank is %d, x is %d, y is %d, fX is %f, fY is %f\n",my_rank,px,py,
+        parts[my_rank][k].fX,parts[my_rank][k].fY );
+    }
   }
  
   return;
+}
+
+void find_velocity(int my_rank,int proc_num) {
+/* Given that the particle array is filled with forces we can use Verlets to 
+    determine the velocity.
+        px(:) = px(:) + vx(:)*dt + 0.5*Fx(:)*dt*dt
+        py(:) = py(:) + vy(:)*dt + 0.5*Fy(:)*dt*dt
+        vx(:) = vx(:) + 0.5*Fx(:)*dt
+        vy(:) = vy(:) + 0.5*Fy(:)*dt
+*/
+
+  int i=0;
+  double dt = 0.1; 
+
+  for (i=0; i<ARRAYSIZE;i++) {
+    if (parts[my_rank][i].x < DUMMY) {
+      parts[my_rank][i].x = parts[my_rank][i].x + parts[my_rank][i].velX * dt + 
+                                  0.5 * (parts[my_rank][i].fX * dt * dt);
+
+      parts[my_rank][i].y = parts[my_rank][i].y + parts[my_rank][i].velX * dt + 
+                                  0.5 * (parts[my_rank][i].fY * dt * dt);  
+
+
+
+      parts[my_rank][i].velX = parts[my_rank][i].velX  + 
+                                  0.5 * (parts[my_rank][i].fX * dt * dt);
+
+      parts[my_rank][i].velY = parts[my_rank][i].velX  + 
+                                  0.5 * (parts[my_rank][i].fY * dt * dt); 
+    } 
+
+  }
+
+  Save_Particle_Data("nextParts",parts,my_rank);
+
 }
 
 /* Function Definitions */
@@ -618,73 +682,37 @@ void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId) {
 
   for ( i = 0; i < ARRAYSIZE; i++ )
   {
-    fprintf(partOut,"%f, %f, %f, %f, %f\n",
+    // add in after debugging
+    //  if (parts[my_rank][k].x < DUMMY) {
+    fprintf(partOut,"%f, %f, %f, %f, %f, %f, %f\n",
       p[myTaskId][i].x,
       p[myTaskId][i].y,
       p[myTaskId][i].fX,
       p[myTaskId][i].fY,
-      p[myTaskId][i].charge);
+      p[myTaskId][i].charge,
+      p[myTaskId][i].velX,
+      p[myTaskId][i].velY);
   }
    
   fclose(partOut);
 }
 
+void do_Poissons(int num_procs) {
 
-MPI_Datatype create_particle_datatype()
-   {
-      MPI_Datatype particle_type;
-      MPI_Type_contiguous (5,MPI_DOUBLE,&particle_type);
-      MPI_Type_commit (&particle_type);
-      return particle_type;
-   }
-
-
-
-int main ( int argc, char *argv[] ) 
-
-{
   double change;
   double epsilon = 1.0E-03;
   //double *f;
   char file_name[100];
   int i;
   int j;
-  int num_procs;
+  
   int step;
   double *swap;
   double my_change;
   int my_n;
   int n;
-  
-/*
-  MPI initialization.
-*/
-  MPI_Init ( &argc, &argv );
 
-  MPI_Comm_size ( MPI_COMM_WORLD, &num_procs );
-
-  MPI_Comm_rank ( MPI_COMM_WORLD, &my_rank );
-
-  
-
-  allocate_arrays ( );
-  rho = make_rho ( );
-  make_domains ( num_procs );
-
-
-//printf("I got past prior inits\n");
-  step = 0;  //what is this?
-
-  //if (my_rank == 0) {
-    printf("my rank is %d\n", my_rank);
-    make_particles(num_procs,my_rank);
-    printf("made it past make particles\n");
-    calc_grid_charges(num_procs, my_rank);
-    //exit(0);
-  //}
-  //make_particles(my_rank);
- // calc_grid_charges(num_procs,my_rank);
-
+  step = 0;
 /*
   Begin iteration.
 */
@@ -735,13 +763,147 @@ int main ( int argc, char *argv[] )
     u_new = swap;
   } while ( epsilon < change );
 
+
+}
+
+MPI_Datatype create_particle_datatype()
+   {
+      MPI_Datatype array_of_types[1];
+    int array_of_blocklengths[1];
+    MPI_Aint array_of_displacements[1];
+
+    /* Create MPI Datatype for Particle struct*/
+    array_of_types[0] = MPI_DOUBLE;
+    array_of_blocklengths[0] = 7;
+    array_of_displacements[0] = 0;
+    MPI_Type_create_struct(1, array_of_blocklengths, array_of_displacements,
+        array_of_types, &particle_type);
+    MPI_Type_commit(&particle_type);
+   }
+
+void move_particles(int num_procs, int my_rank) {
+
+  int i=0;
+  int foo = 0;
+  int bar = 0;
+  double range = (XYMAX - 1 - XYMIN); 
+  double skip = range/num_procs;
+  double px, rpx = 0.0;
+
+  int count = 1;
+  int rcount = 1;
+  int tag2 = 123;
+  int source = 0;
+  int dest=1;
+  MPI_Status status;
+  Particle *mail;
+
+  if (my_rank ==0) {
+    for (i=0;i<ARRAYSIZE;i++) {
+      px = parts[my_rank][i].x;
+      //first check if it not out of bounds
+      if (px >= XYMIN && px <= XYMAX) {
+        printf ("particle in bounds x is %f\n",px);
+        if ( px > ((my_rank + 1) * skip)) {
+          // move particle to the right
+          dest = my_rank + 1;
+          printf("Inside move particle to the RIGHT");
+          
+          //Remove from local
+          parts[my_rank][i].x = DUMMY;
+          parts[my_rank][i].y = DUMMY;
+        }
+        else if (px < (XYMIN + (my_rank * skip))) {
+          //move particle to the left
+          printf("Inside move particle to the LEFT\n");
+          if (my_rank == 0) {
+            //particle is out of bounds erase from listing
+            parts[my_rank][i].x = DUMMY;
+            parts[my_rank][i].y = DUMMY;
+          }
+
+        }
+        else {
+          // Value is good send dummy message
+          int foo = 999;
+          dest =1;
+          
+        }
+        
+      }
+      else {
+        // Particle is out of bounds so just erase it
+        // and send dummy message
+        int foo = 9999;
+          dest =1;
+         
+      }
+
+    }
+    bar = 5;
+        printf("crap bar is %d count is %d dest is %d tag2 is %d\n",bar,count,dest,tag2);
+        // Send the ARRAY of particles over to other domains
+        MPI_Send(&bar, count, MPI_INT, dest, tag2, MPI_COMM_WORLD);
+          //MPI_Send(&pListY[dest][0], ARRAYSIZE, MPI_DOUBLE, dest, tag2, MPI_COMM_WORLD);
+  }
+
+  else if (my_rank == 1) {
+    // Recieve in the particles and add to your list
+    MPI_Recv(&rcount, count, MPI_INT, source, tag2, 
+        MPI_COMM_WORLD, &status);
+    //MPI_Recv(&pListY[taskid][0], ARRAYSIZE, MPI_DOUBLE, source, tag2, 
+      //  MPI_COMM_WORLD, &status);
+
+    printf("Holy Shit I got a particle x is: %d\n",rcount);
+  }
+}
+
+int main ( int argc, char *argv[] ) 
+
+{
+  
+  int num_procs;
+  
+/*
+  MPI initialization.
+*/
+  MPI_Init ( &argc, &argv );
+
+  MPI_Comm_size ( MPI_COMM_WORLD, &num_procs );
+
+  MPI_Comm_rank ( MPI_COMM_WORLD, &my_rank );
+
+  
+
+  allocate_arrays ( );
+  rho = make_rho ( );
+  make_domains ( num_procs );
+
+
+//printf("I got past prior inits\n");
+  //step = 0;  //what is this?
+
+  //if (my_rank == 0) {
+    printf("my rank is %d\n", my_rank);
+    make_particles(num_procs,my_rank);
+    printf("made it past make particles\n");
+    calc_grid_charges(num_procs, my_rank);
+    //exit(0);
+  //}
+  //make_particles(my_rank);
+ // calc_grid_charges(num_procs,my_rank);
+
+  do_Poissons(num_procs);
+
   Form_E_Field(num_procs,u_new);
 
-
-
-  printf("just before calc_forces\n");
-
   calc_forces(num_procs);
+
+  Save_Particle_Data("particles",parts,my_rank);
+
+  find_velocity(my_rank,num_procs);
+
+  move_particles(num_procs,my_rank);
 
 /* 
   Each process writes out a file the solution and gradient
@@ -754,7 +916,7 @@ int main ( int argc, char *argv[] )
 
   Save_Data("voltages",rho,my_rank);
 
-  Save_Particle_Data("particles",parts,my_rank);
+  
   
 
 /*
