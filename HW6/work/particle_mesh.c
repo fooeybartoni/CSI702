@@ -4,7 +4,7 @@
 # include <math.h>
 # include <string.h>
 
-#define  ARRAYSIZE   100
+#define  ARRAYSIZE   400
 #define  MASTER      0
 #define XYMAX 33.0
 #define XYMIN 0.0
@@ -20,8 +20,6 @@ double  dataY[ARRAYSIZE];
 
 double gridPtChg[ARRAYSIZE];
 
-double pListX[4][ARRAYSIZE];
-double pListY[4][ARRAYSIZE];
 
 struct partStruct {
    double x,y,fX,fY,charge,velX,velY;
@@ -61,13 +59,13 @@ void allocate_arrays ( );
 void jacobi ( int num_procs, double rho[] );
 void make_domains ( int num_procs );
 double *make_rho ( );
-void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId);
+void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId,int loop);
 void Save_Data(char* name,double grad[],int myTaskId);
 void make_particles(int num_procs,int my_rank);
 void calc_grid_charges(int num_procs, int my_rank);
 void calc_forces(int num_procs);
 void Form_E_Field(int num_procs, double u_new[]);
-void find_velocity(int my_rank,int proc_num);
+void find_velocity(int my_rank,int proc_num,int loop);
 void do_Poissons(int num_procs);
 
 /*
@@ -185,7 +183,7 @@ void calc_grid_charges(int num_procs, int my_rank) {
 void calc_forces(int num_procs) {
   
 
-Save_Data("eFieldX_test",eFieldX,my_rank);
+//Save_Data("eFieldX_test",eFieldX,my_rank);
 
   printf("in the calc forces method\n");
   /* Calculate the force given the charge and the Electric field
@@ -247,7 +245,7 @@ Save_Data("eFieldX_test",eFieldX,my_rank);
   return;
 }
 
-void find_velocity(int my_rank,int proc_num) {
+void find_velocity(int my_rank,int proc_num,int loop) {
 /* Given that the particle array is filled with forces we can use Verlets to 
     determine the velocity.
         px(:) = px(:) + vx(:)*dt + 0.5*Fx(:)*dt*dt
@@ -278,7 +276,7 @@ void find_velocity(int my_rank,int proc_num) {
 
   }
 
-  Save_Particle_Data("nextParts",parts,my_rank);
+  Save_Particle_Data("nextParts",parts,my_rank,loop);
 
 }
 
@@ -665,7 +663,7 @@ void Save_Data(char* name,double grad[],int myTaskId) {
    fclose(fpGradient);
 }
 
-void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId) {
+void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId, int loop) {
   FILE * partOut;
       
   int i;
@@ -673,7 +671,7 @@ void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId) {
    
   char buffer[16];
      
-  sprintf(buffer, "%s%d.out", name,myTaskId);
+  sprintf(buffer, "loop%d%s%d.out", loop,name,myTaskId);
    
 
   if((partOut=fopen(buffer, "w+"))==NULL) {
@@ -683,15 +681,16 @@ void Save_Particle_Data(char* name,Particle p[][ARRAYSIZE],int myTaskId) {
   for ( i = 0; i < ARRAYSIZE; i++ )
   {
     // add in after debugging
-    //  if (parts[my_rank][k].x < DUMMY) {
-    fprintf(partOut,"%f, %f, %f, %f, %f, %f, %f\n",
-      p[myTaskId][i].x,
-      p[myTaskId][i].y,
-      p[myTaskId][i].fX,
-      p[myTaskId][i].fY,
-      p[myTaskId][i].charge,
-      p[myTaskId][i].velX,
-      p[myTaskId][i].velY);
+    if (parts[my_rank][i].x < DUMMY) {
+      fprintf(partOut,"%f, %f, %f, %f, %f, %f, %f\n",
+        p[myTaskId][i].x,
+        p[myTaskId][i].y,
+        p[myTaskId][i].fX,
+        p[myTaskId][i].fY,
+        p[myTaskId][i].charge,
+        p[myTaskId][i].velX,
+        p[myTaskId][i].velY);
+    }
   }
    
   fclose(partOut);
@@ -783,6 +782,21 @@ MPI_Datatype create_particle_datatype()
 
 void move_particles(int num_procs, int my_rank) {
 
+double pListX[ARRAYSIZE];
+double pListY[ARRAYSIZE];
+double pListVelX[ARRAYSIZE];
+double pListVelY[ARRAYSIZE];
+double pListCharge[ARRAYSIZE];
+
+double rListX[ARRAYSIZE];
+double rListY[ARRAYSIZE];
+double rListVelX[ARRAYSIZE];
+double rListVelY[ARRAYSIZE];
+double rListCharge[ARRAYSIZE];
+
+
+
+
   int i=0;
   int foo = 0;
   int bar = 0;
@@ -790,72 +804,136 @@ void move_particles(int num_procs, int my_rank) {
   double skip = range/num_procs;
   double px, rpx = 0.0;
 
+  int lFlag = 0;
+  int rFlag = 0;
+
   int count = 1;
   int rcount = 1;
+  int tag1 = 1;
   int tag2 = 123;
   int source = 0;
-  int dest=1;
+  int left;
+  int right;
+  
   MPI_Status status;
-  Particle *mail;
+  MPI_Request request[16];
+  int requests;
+  //MPI_Status status[16];
 
-  if (my_rank ==0) {
+  // clean and initialize transfer array
+  for (i=0;i<ARRAYSIZE * 2;i++) {
+    pListX[i] = 999.0;
+    pListY[i] = 999.0;
+  }
+//printf("in part move rank %d",my_rank);
+  //if (my_rank ==0) {
     for (i=0;i<ARRAYSIZE;i++) {
       px = parts[my_rank][i].x;
       //first check if it not out of bounds
       if (px >= XYMIN && px <= XYMAX) {
         printf ("particle in bounds x is %f\n",px);
-        if ( px > ((my_rank + 1) * skip)) {
+        if ( my_rank < num_procs-1 &&  px > ((my_rank + 1) * skip)) {
           // move particle to the right
-          dest = my_rank + 1;
-          printf("Inside move particle to the RIGHT");
-          
+          //rDest = my_rank + 1;
+          rFlag = 1;
+          printf("Inside move particle to the RIGHT rank %d, px %f\n",my_rank,px);
+          pListX[i] = parts[my_rank][i].x;
+          pListY[i] = parts[my_rank][i].y;
+          pListVelX[i] = parts[my_rank][i].velX;
+          pListVelY[i] = parts[my_rank][i].velY;
+          pListCharge[i] = parts[my_rank][i].charge; 
+
+
           //Remove from local
           parts[my_rank][i].x = DUMMY;
           parts[my_rank][i].y = DUMMY;
         }
-        else if (px < (XYMIN + (my_rank * skip))) {
+        else if (my_rank > 0 &&  px < (XYMIN + (my_rank * skip))) {
           //move particle to the left
           printf("Inside move particle to the LEFT\n");
-          if (my_rank == 0) {
-            //particle is out of bounds erase from listing
-            parts[my_rank][i].x = DUMMY;
-            parts[my_rank][i].y = DUMMY;
-          }
+          //lDest = my_rank - 1;
+          printf("Inside move particle to the RIGHT");
+          pListX[i] = parts[my_rank][i].x;
+          pListY[i] = parts[my_rank][i].y;
+          pListVelX[i] = parts[my_rank][i].velX;
+          pListVelY[i] = parts[my_rank][i].velY;
+          pListCharge[i] = parts[my_rank][i].charge; 
 
+
+          //Remove from local
+          parts[my_rank][i].x = DUMMY;
+          parts[my_rank][i].y = DUMMY;
         }
         else {
-          // Value is good send dummy message
-          int foo = 999;
-          dest =1;
-          
+          // Value is good take no action
+          // Nothing to do as array is initialized with dummy data          
         }
         
       }
       else {
         // Particle is out of bounds so just erase it
-        // and send dummy message
-        int foo = 9999;
-          dest =1;
+        parts[my_rank][i].x = DUMMY;
+        parts[my_rank][i].y = DUMMY;
          
       }
 
     }
-    bar = 5;
-        printf("crap bar is %d count is %d dest is %d tag2 is %d\n",bar,count,dest,tag2);
-        // Send the ARRAY of particles over to other domains
-        MPI_Send(&bar, count, MPI_INT, dest, tag2, MPI_COMM_WORLD);
-          //MPI_Send(&pListY[dest][0], ARRAYSIZE, MPI_DOUBLE, dest, tag2, MPI_COMM_WORLD);
-  }
+    
+      // Send the ARRAY of particles over to other domains
+      pListX[0] = 567.88;
+ 
 
-  else if (my_rank == 1) {
-    // Recieve in the particles and add to your list
-    MPI_Recv(&rcount, count, MPI_INT, source, tag2, 
-        MPI_COMM_WORLD, &status);
-    //MPI_Recv(&pListY[taskid][0], ARRAYSIZE, MPI_DOUBLE, source, tag2, 
-      //  MPI_COMM_WORLD, &status);
 
-    printf("Holy Shit I got a particle x is: %d\n",rcount);
-  }
+      left = my_rank - 1;    /* left neighbour */
+      right = my_rank + 1;   /* right neighbour */
+
+      /*
+       * here we make a decision about what to do at the ends of the chain
+       * do not send let it escape
+       */
+
+      if (left < 0) left = MPI_PROC_NULL;
+      if (right > num_procs - 1) right = MPI_PROC_NULL;
+   
+   
+              //printf("receiving Shit from LEFT rank %d\n",my_rank);
+        //MPI_Sendrecv(pListX, ARRAYSIZE, MPI_DOUBLE, right, tag1,
+         //            rListX, ARRAYSIZE, MPI_DOUBLE, left, tag2, 
+        //  MPI_COMM_WORLD, &status);
+
+      //MPI_Sendrecv(&lFlag, 1, MPI_INT, right, tag1,
+       //              &rFlag, 1, MPI_INT, left, tag2, 
+       //   MPI_COMM_WORLD, &status);
+    
+        printf ("Process %d received %f from %d and sent %f to %d\n", 
+          my_rank, lFlag, left, rFlag, right);
+        
+
+
+        //printf("sending Shit RIGHT rank %d\n",my_rank);
+        //MPI_Isend(&pListX[0], ARRAYSIZE, MPI_DOUBLE, rDest, tag1, MPI_COMM_WORLD,request + requests++);
+          
+
+      
+      // Send to the LEFT
+      //if (my_rank > 0 ) {
+        //printf("receiving Shit from RIGHT rank %d\n",my_rank);
+        
+        //MPI_Irecv(&pListX[100], ARRAYSIZE, MPI_DOUBLE, my_rank+1, tag2, 
+          //MPI_COMM_WORLD, request + requests++);
+        
+       // printf("sending Shit LEFT rank %d\n",my_rank);
+        //MPI_Isend(&pListX[0], ARRAYSIZE, MPI_DOUBLE, lDest, tag2, MPI_COMM_WORLD,request + requests++);
+      //}
+  //}
+
+ 
+    printf("requests %d",requests);
+    //MPI_Waitall ( requests, request, status );
+    //MPI_Wait(&request,&status);
+//MPI_Barrier(MPI_COMM_WORLD);
+    //printf("Holy Shit rank %d I got a particle x is: %f\n",my_rank,pListX[100]);
+  //}
 }
 
 int main ( int argc, char *argv[] ) 
@@ -863,6 +941,8 @@ int main ( int argc, char *argv[] )
 {
   
   int num_procs;
+
+  int i;
   
 /*
   MPI initialization.
@@ -880,30 +960,27 @@ int main ( int argc, char *argv[] )
   make_domains ( num_procs );
 
 
-//printf("I got past prior inits\n");
-  //step = 0;  //what is this?
+  printf("my rank is %d\n", my_rank);
+  make_particles(num_procs,my_rank);
+  printf("made it past make particles\n");
+  
+  Save_Particle_Data("particles",parts,my_rank,0);
 
-  //if (my_rank == 0) {
-    printf("my rank is %d\n", my_rank);
-    make_particles(num_procs,my_rank);
-    printf("made it past make particles\n");
+  for (i=1;i<12;i++) {
     calc_grid_charges(num_procs, my_rank);
-    //exit(0);
-  //}
-  //make_particles(my_rank);
- // calc_grid_charges(num_procs,my_rank);
+    
+    do_Poissons(num_procs);
 
-  do_Poissons(num_procs);
+    Form_E_Field(num_procs,u_new);
 
-  Form_E_Field(num_procs,u_new);
+    calc_forces(num_procs);
 
-  calc_forces(num_procs);
+    
 
-  Save_Particle_Data("particles",parts,my_rank);
+    find_velocity(my_rank,num_procs,i);
 
-  find_velocity(my_rank,num_procs);
-
-  move_particles(num_procs,my_rank);
+  //move_particles(num_procs,my_rank);
+  }
 
 /* 
   Each process writes out a file the solution and gradient
